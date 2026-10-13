@@ -1,0 +1,17 @@
+name: stripe-preview
+components:
+  - id: stripe_webhook
+    adapter: stripe@1
+    ownership: managed
+    config:
+      host: "{env}.preview.example.com"
+      path: /api/webhooks/stripe
+      events: checkout.session.completed,customer.subscription.updated,invoice.paid
+bindings:
+  - from: stripe_webhook.STRIPE_WEBHOOK_SECRET
+    to: dotenv.STRIPE_WEBHOOK_SECRET
+  - from: stripe_webhook.STRIPE_WEBHOOK_ENDPOINT_ID
+    to: dotenv.STRIPE_WEBHOOK_ENDPOINT_ID
+policy:
+  expires_in: 7d
+  protect: false

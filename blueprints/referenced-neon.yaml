@@ -1,0 +1,15 @@
+name: shared-staging
+components:
+  - id: shared_db
+    adapter: neon@1
+    ownership: referenced
+    config:
+      id: REPLACE_WITH_NEON_BRANCH_ID
+      project_id: REPLACE_WITH_NEON_PROJECT_ID
+      database_name: REPLACE_WITH_NEON_DATABASE
+      role_name: REPLACE_WITH_NEON_ROLE
+bindings:
+  - from: shared_db.DATABASE_URL
+    to: env.DATABASE_URL
+policy:
+  protect: true
