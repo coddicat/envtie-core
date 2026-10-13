@@ -1,0 +1,21 @@
+name: preview
+components:
+  - id: postgres
+    adapter: neon@1
+    ownership: managed
+    config:
+      project_id: REPLACE_WITH_NEON_PROJECT_ID
+      database_name: REPLACE_WITH_NEON_DATABASE
+      role_name: REPLACE_WITH_NEON_ROLE
+  - id: github
+    adapter: github@1
+    ownership: managed
+    depends_on: [postgres]
+    config:
+      deployment: "true"
+bindings:
+  - from: postgres.DATABASE_URL
+    to: github.environment.secret.DATABASE_URL
+policy:
+  expires_in: 1d
+  protect: false

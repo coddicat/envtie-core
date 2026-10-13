@@ -1,0 +1,28 @@
+{
+  "name": "@envtie.dev/cli",
+  "version": "0.0.0-dev",
+  "description": "EnvTie.dev customer runner launcher",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "envtie": "bin/envtie.js"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "optionalDependencies": {
+    "@envtie.dev/cli-darwin-arm64": "0.0.0-dev",
+    "@envtie.dev/cli-darwin-x64": "0.0.0-dev",
+    "@envtie.dev/cli-linux-arm64": "0.0.0-dev",
+    "@envtie.dev/cli-linux-x64": "0.0.0-dev",
+    "@envtie.dev/cli-win32-arm64": "0.0.0-dev",
+    "@envtie.dev/cli-win32-x64": "0.0.0-dev"
+  }
+}

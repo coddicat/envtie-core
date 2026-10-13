@@ -1,0 +1,9 @@
+**/node_modules
+**/.next
+**/build-output
+**/package-lock.json
+web/next-env.d.ts
+dist
+.toolchain
+.gocache
+.gomodcache

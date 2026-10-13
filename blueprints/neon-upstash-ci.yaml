@@ -1,0 +1,39 @@
+# Canonical GitHub Actions Neon + Upstash blueprint.
+# The runner resolves only the official adapters used by the signed plan.
+#
+# The github component owns the per-PR GitHub Environment. Secret outputs are
+# sealed on the runner for that environment and public outputs become
+# variables. A later workflow job references the environment and receives
+# these values from GitHub.
+name: consumer-bench
+components:
+  - id: postgres
+    adapter: neon@1
+    ownership: managed
+    config:
+      project_id: REPLACE_WITH_NEON_PROJECT_ID
+      database_name: REPLACE_WITH_NEON_DATABASE
+      role_name: REPLACE_WITH_NEON_ROLE
+  - id: cache
+    adapter: upstash@1
+    ownership: managed
+    depends_on: [postgres]
+    config:
+      platform: aws
+      primary_region: us-east-1
+  - id: github
+    adapter: github@1
+    ownership: managed
+    depends_on: [postgres, cache]
+    config:
+      deployment: "true"
+bindings:
+  - from: postgres.DATABASE_URL
+    to: github.environment.secret.DATABASE_URL
+  - from: cache.UPSTASH_REDIS_REST_URL
+    to: github.environment.variable.UPSTASH_REDIS_REST_URL
+  - from: cache.UPSTASH_REDIS_REST_TOKEN
+    to: github.environment.secret.UPSTASH_REDIS_REST_TOKEN
+policy:
+  expires_in: 1d
+  protect: false

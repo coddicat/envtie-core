@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GO_VERSION: "1.27.2"
+
+jobs:
+  test:
+    name: Core · test
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race -count=1 ./...
+      - name: Validate workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Validate npm launcher
+        run: node --check packages/cli/bin/envtie.js
+
+  required:
+    name: Core · required
+    if: always()
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require successful checks
+        env:
+          RESULT: ${{ needs.test.result }}
+        run: test "$RESULT" = success

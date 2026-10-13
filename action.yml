@@ -1,0 +1,108 @@
+name: EnvTie.dev
+description: Run approved EnvTie.dev jobs from GitHub Actions. Pull-request previews created by the dashboard do not use this action.
+author: EnvTie.dev
+branding:
+  icon: layers
+  color: blue
+
+inputs:
+  api-url:
+    description: Control plane URL, for example https://api.envtie.example.com
+    required: true
+  runner-token:
+    description: Runner token from the dashboard (Runners → Register runner). Store it as a secret.
+    required: true
+  public-key:
+    description: Control plane signing key shown in the dashboard; plans signed by any other key are rejected.
+    required: true
+  version:
+    description: EnvTie.dev release to install, for example v2.0.0. Defaults to the tag this action is referenced by.
+    required: false
+    default: ""
+  install-dir:
+    description: Where the verified core runner is installed, relative to working-directory.
+    required: false
+    default: envtie-bin
+  working-directory:
+    description: Directory the runner runs in; relative blueprint paths and file bindings resolve from here.
+    required: false
+    default: .
+  release-url:
+    description: Download base for a mirror of the release assets. Defaults to this action's GitHub release for the chosen version.
+    required: false
+    default: ""
+
+outputs:
+  bin-dir:
+    description: Absolute path of the installed core runner.
+    value: ${{ steps.install.outputs.bin-dir }}
+runs:
+  using: composite
+  steps:
+    - id: install
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_INSTALL_DIR: ${{ inputs.install-dir }}
+        INPUT_RELEASE_URL: ${{ inputs.release-url }}
+        ACTION_REF: ${{ github.action_ref }}
+        ACTION_REPOSITORY: ${{ github.action_repository }}
+      run: |
+        set -euo pipefail
+        version="${INPUT_VERSION:-$ACTION_REF}"
+        if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+          echo "::error::Set the 'version' input (for example v2.0.0) or reference the action by a release tag."
+          exit 1
+        fi
+        case "$RUNNER_OS" in
+          Linux) os=linux ;; macOS) os=darwin ;; Windows) os=windows ;;
+          *) echo "::error::Unsupported runner OS $RUNNER_OS"; exit 1 ;;
+        esac
+        case "$RUNNER_ARCH" in
+          X64) arch=amd64 ;; ARM64) arch=arm64 ;;
+          *) echo "::error::Unsupported runner architecture $RUNNER_ARCH"; exit 1 ;;
+        esac
+        ext=""; [ "$os" = windows ] && ext=".exe"
+        names="envtie"
+        base="${INPUT_RELEASE_URL:-https://github.com/${ACTION_REPOSITORY}/releases/download/${version}}"
+        base="${base%/}"
+        mkdir -p "$INPUT_INSTALL_DIR"
+        bin="$(cd "$INPUT_INSTALL_DIR" && pwd)"
+        download() { curl -fsSL --retry 3 --retry-all-errors -o "$2" "$1"; }
+        download "$base/SHA256SUMS.txt" "$bin/SHA256SUMS.release.txt"
+        if command -v sha256sum >/dev/null; then sum() { sha256sum "$1" | cut -d' ' -f1; }; else sum() { shasum -a 256 "$1" | cut -d' ' -f1; }; fi
+        : > "$bin/SHA256SUMS.txt"
+        for name in $names; do
+          asset="${name}_${version}_${os}_${arch}${ext}"
+          expected="$(awk -v f="$asset" '$2 == f || $2 == "*"f {print $1}' "$bin/SHA256SUMS.release.txt")"
+          if [ -z "$expected" ]; then echo "::error::$asset is not listed in the $version release"; exit 1; fi
+          download "$base/$asset" "$bin/$name$ext"
+          actual="$(sum "$bin/$name$ext")"
+          if [ "$actual" != "$expected" ]; then echo "::error::Checksum mismatch for $asset"; exit 1; fi
+          chmod +x "$bin/$name$ext"
+          echo "$actual  $name$ext" >> "$bin/SHA256SUMS.txt"
+        done
+        rm "$bin/SHA256SUMS.release.txt"
+        native="$bin"; [ "$os" = windows ] && native="$(cygpath -w "$bin")"
+        { echo "bin-dir=$native"; echo "bin-posix=$bin"; } >> "$GITHUB_OUTPUT"
+        echo "$native" >> "$GITHUB_PATH"
+        {
+          echo "### EnvTie.dev $version ($os/$arch)"
+          echo "Verified native runner:"
+          echo '```'
+          cat "$bin/SHA256SUMS.txt"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Run approved jobs
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ENVTIE_API_URL: ${{ inputs.api-url }}
+        ENVTIE_RUNNER_TOKEN: ${{ inputs.runner-token }}
+        ENVTIE_PUBLIC_KEY: ${{ inputs.public-key }}
+        ENVTIE_BIN: ${{ steps.install.outputs.bin-posix }}
+      run: |
+        set -euo pipefail
+        "$ENVTIE_BIN/envtie" runner execute --once

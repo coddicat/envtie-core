@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://envtie.example/schemas/blueprint-v1.json",
+  "title": "EnvTie.dev blueprint v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "components"],
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$" },
+    "components": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/component" } },
+    "bindings": { "type": "array", "items": { "$ref": "#/$defs/binding" } },
+    "policy": { "$ref": "#/$defs/policy" }
+  },
+  "$defs": {
+    "component": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "adapter", "ownership"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$" },
+        "adapter": { "type": "string", "pattern": "^[a-z][a-z0-9-]*@[0-9]+$" },
+        "executable": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "registry", "publisher", "version"],
+          "properties": {
+            "kind": { "const": "registry" },
+            "registry": { "type": "string", "format": "uri" },
+            "publisher": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$" },
+            "version": { "type": "string", "minLength": 1, "maxLength": 80 }
+          }
+        },
+        "ownership": { "enum": ["managed", "referenced"] },
+        "depends_on": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "config": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "allOf": [{
+        "if": { "properties": { "adapter": { "enum": ["neon@1", "upstash@1", "github@1", "stripe@1"] } } },
+        "then": true,
+        "else": {
+          "oneOf": [
+            { "required": ["executable", "sha256"] },
+            { "required": ["source"] }
+          ]
+        }
+      }]
+    },
+    "binding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": { "from": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*\\.[A-Za-z_][A-Za-z0-9_]*$" }, "to": { "type": "string" } }
+    },
+    "policy": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "expires_in": { "type": "string" }, "protect": { "type": "boolean" } }
+    }
+  }
+}
