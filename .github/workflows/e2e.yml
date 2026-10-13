@@ -1,0 +1,56 @@
+name: Core end to end
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.27.2"
+
+jobs:
+  action:
+    name: GitHub Action · install
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Build local release mirror
+        run: |
+          sh scripts/release-binaries.sh v0.0.0-ci "$RUNNER_TEMP/release" linux/amd64
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory "$RUNNER_TEMP/release" >/dev/null 2>&1 &
+          for _ in $(seq 1 20); do curl -fs http://127.0.0.1:8765/SHA256SUMS.txt >/dev/null && break; sleep 0.5; done
+      - name: Install through action
+        id: envtie
+        uses: ./
+        with:
+          version: v0.0.0-ci
+          release-url: http://127.0.0.1:8765
+          api-url: https://envtie.invalid
+          runner-token: unused
+          public-key: unused
+          execute: "false"
+      - name: Verify installed CLI
+        run: |
+          test "$(envtie version)" = v0.0.0-ci
+          test ! -e "${{ steps.envtie.outputs.bin-dir }}/adapter-stripe"
+
+  windows:
+    name: Windows · package smoke
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - shell: pwsh
+        run: ./scripts/build.ps1
+      - shell: pwsh
+        run: ./dist/envtie.exe version

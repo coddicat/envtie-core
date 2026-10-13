@@ -31,6 +31,10 @@ inputs:
     description: Download base for a mirror of the release assets. Defaults to this action's GitHub release for the chosen version.
     required: false
     default: ""
+  execute:
+    description: Run one approved job after installation. Set false only when another step will invoke the CLI.
+    required: false
+    default: "true"
 
 outputs:
   bin-dir:
@@ -96,6 +100,7 @@ runs:
         } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Run approved jobs
+      if: ${{ inputs.execute == 'true' }}
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
