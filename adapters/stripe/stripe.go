@@ -33,10 +33,18 @@ var (
 type Handler struct{}
 
 func (Handler) Manifest() adapter.Manifest {
-	return adapter.Manifest{Name: "stripe", Version: "1.0.0", Protocol: 1, Capabilities: []string{"read", "apply", "validate", "outputs", "destroy"}, CredentialEnv: []string{"STRIPE_SECRET_KEY"}, Outputs: []adapter.Field{
-		{Name: "STRIPE_WEBHOOK_SECRET", Sensitivity: "SECRET", Availability: adapter.AvailabilityCreate},
-		{Name: "STRIPE_WEBHOOK_ENDPOINT_ID", Sensitivity: "PUBLIC"},
-	}}
+	return adapter.Manifest{
+		Name: "stripe", Version: "1.0.0", Protocol: 1,
+		Capabilities:  []string{"read", "apply", "validate", "outputs", "destroy"},
+		CredentialEnv: []string{"STRIPE_SECRET_KEY"},
+		Inputs: []adapter.Input{
+			{Name: "STRIPE_SECRET_KEY", Kind: adapter.InputSecret, Required: true, Description: "Stripe secret key"},
+		},
+		Outputs: []adapter.Field{
+			{Name: "STRIPE_WEBHOOK_SECRET", Sensitivity: "SECRET", Availability: adapter.AvailabilityCreate},
+			{Name: "STRIPE_WEBHOOK_ENDPOINT_ID", Sensitivity: "PUBLIC"},
+		},
+	}
 }
 
 type endpoint struct {

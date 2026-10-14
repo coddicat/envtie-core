@@ -12,7 +12,15 @@ import (
 type Handler struct{}
 
 func (Handler) Manifest() adapter.Manifest {
-	return adapter.Manifest{Name: "neon", Version: "1.0.0", Protocol: 1, Capabilities: []string{"read", "apply", "validate", "outputs", "destroy"}, CredentialEnv: []string{"NEON_API_KEY"}, Outputs: []adapter.Field{{Name: "DATABASE_URL", Sensitivity: "SECRET"}}}
+	return adapter.Manifest{
+		Name: "neon", Version: "1.0.0", Protocol: 1,
+		Capabilities:  []string{"read", "apply", "validate", "outputs", "destroy"},
+		CredentialEnv: []string{"NEON_API_KEY"},
+		Inputs: []adapter.Input{
+			{Name: "NEON_API_KEY", Kind: adapter.InputSecret, Required: true, Description: "Neon API key"},
+		},
+		Outputs: []adapter.Field{{Name: "DATABASE_URL", Sensitivity: "SECRET"}},
+	}
 }
 
 func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response, error) {

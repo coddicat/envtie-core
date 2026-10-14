@@ -13,7 +13,16 @@ import (
 type Handler struct{}
 
 func (Handler) Manifest() adapter.Manifest {
-	return adapter.Manifest{Name: "upstash", Version: "1.0.0", Protocol: 1, Capabilities: []string{"read", "apply", "validate", "outputs", "destroy"}, CredentialEnv: []string{"UPSTASH_EMAIL", "UPSTASH_API_KEY"}, Outputs: []adapter.Field{{Name: "REDIS_URL", Sensitivity: "SECRET"}, {Name: "UPSTASH_REDIS_REST_URL", Sensitivity: "PUBLIC"}, {Name: "UPSTASH_REDIS_REST_TOKEN", Sensitivity: "SECRET"}}}
+	return adapter.Manifest{
+		Name: "upstash", Version: "1.0.0", Protocol: 1,
+		Capabilities:  []string{"read", "apply", "validate", "outputs", "destroy"},
+		CredentialEnv: []string{"UPSTASH_EMAIL", "UPSTASH_API_KEY"},
+		Inputs: []adapter.Input{
+			{Name: "UPSTASH_EMAIL", Kind: adapter.InputVariable, Required: true, Description: "Upstash account email"},
+			{Name: "UPSTASH_API_KEY", Kind: adapter.InputSecret, Required: true, Description: "Upstash API key"},
+		},
+		Outputs: []adapter.Field{{Name: "REDIS_URL", Sensitivity: "SECRET"}, {Name: "UPSTASH_REDIS_REST_URL", Sensitivity: "PUBLIC"}, {Name: "UPSTASH_REDIS_REST_TOKEN", Sensitivity: "SECRET"}},
+	}
 }
 
 func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response, error) {

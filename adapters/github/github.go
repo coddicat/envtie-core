@@ -29,6 +29,11 @@ func (Handler) Manifest() adapter.Manifest {
 		// The runner copies only these names into the adapter process.
 		// GITHUB_REPOSITORY and GITHUB_SHA are Actions context, not secrets.
 		CredentialEnv: []string{"GITHUB_TOKEN", "GITHUB_REPOSITORY", "GITHUB_SHA"},
+		Inputs: []adapter.Input{
+			{Name: "GITHUB_TOKEN", Kind: adapter.InputSecret, Required: true, Description: "GitHub App installation token"},
+			{Name: "GITHUB_REPOSITORY", Kind: adapter.InputContext, Required: true, Description: "Repository owner/name"},
+			{Name: "GITHUB_SHA", Kind: adapter.InputContext, Required: false, Description: "Commit recorded when the plan requests a deployment"},
+		},
 		Outputs: []adapter.Field{
 			{Name: "ENVIRONMENT_NAME", Sensitivity: "PUBLIC"},
 			{Name: "ENVIRONMENT_URL", Sensitivity: "PUBLIC"},

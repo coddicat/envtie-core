@@ -777,7 +777,14 @@ type runnerConfig struct {
 	idle           time.Duration
 	jobsRoot       string
 	exactOperation string
+	notified       map[string]struct{}
 }
+
+var errCredentialsDeferred = errors.New("credentials deferred")
+
+type missingCredentialsError struct{}
+
+func (missingCredentialsError) Error() string { return "missing credentials" }
 
 func (cfg runnerConfig) jobsRootPath() string {
 	if cfg.jobsRoot != "" {
@@ -823,6 +830,9 @@ func executeRunner(ctx context.Context, cfg runnerConfig) error {
 	}
 	unauthorized := false
 	done, failed := 0, 0
+	if cfg.notified == nil {
+		cfg.notified = map[string]struct{}{}
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -862,11 +872,19 @@ func executeRunner(ctx context.Context, cfg runnerConfig) error {
 			continue
 		}
 		unauthorized = false
-		done++
 		if err := cfg.runJob(ctx, job); err != nil {
+			if errors.Is(err, errCredentialsDeferred) {
+				pause(ctx, cfg.idle)
+				continue
+			}
+			done++
 			failed++
-			fmt.Fprintln(os.Stderr, "runner: operation failed:", err)
+			var missing missingCredentialsError
+			if !errors.As(err, &missing) {
+				fmt.Fprintln(os.Stderr, "runner: operation failed:", err)
+			}
 		} else {
+			done++
 			fmt.Fprintf(os.Stderr, "runner: %s %s completed\n", job.Kind, job.Environment.Name)
 		}
 	}
@@ -922,11 +940,58 @@ func (cfg *runnerConfig) lease(ctx context.Context) (runnerJob, error) {
 	return payload.runnerJob, nil
 }
 
+func (cfg runnerConfig) ensureCredentials(ctx context.Context, job runnerJob) error {
+	engine := runner.Engine{Call: cfg.call}
+	gaps, err := engine.CredentialGaps(ctx, job.Plan.Actions, job.Plan.Bindings, job.Kind == "apply")
+	if err != nil {
+		return err
+	}
+	if len(gaps) > 0 && runnerCanPrompt() {
+		_ = promptForCredentials(gaps)
+		gaps, err = engine.CredentialGaps(ctx, job.Plan.Actions, job.Plan.Bindings, job.Kind == "apply")
+		if err != nil {
+			return err
+		}
+	}
+	if len(gaps) == 0 {
+		return nil
+	}
+	if cfg.notified != nil {
+		cfg.notified[job.OperationID] = struct{}{}
+	}
+	explainMissingCredentials(job.Environment.Name, gaps)
+	if err := cfg.releaseLease(ctx, job.OperationID); err != nil {
+		fmt.Fprintln(os.Stderr, "runner: the approval stays leased until it expires")
+	}
+	return missingCredentialsError{}
+}
+
+func (cfg runnerConfig) releaseLease(ctx context.Context, operationID string) error {
+	status, err := cfg.post(ctx, cfg.jobsRootPath()+"/"+url.PathEscape(operationID)+"/release", map[string]any{})
+	if err != nil || status != http.StatusNoContent {
+		return errors.New("release rejected")
+	}
+	return nil
+}
+
 func (cfg runnerConfig) runJob(ctx context.Context, job runnerJob) error {
 	if plansig.Verify(job.Plan, job.WorkspaceID, cfg.pub, time.Now()) != nil {
 		return fmt.Errorf("rejected operation %s: plan signature invalid or expired", job.OperationID)
 	}
+	if cfg.notified != nil {
+		if _, seen := cfg.notified[job.OperationID]; seen {
+			_ = cfg.releaseLease(ctx, job.OperationID)
+			return errCredentialsDeferred
+		}
+	}
 	fmt.Fprintf(os.Stderr, "runner: %s %s (operation %s)\n", job.Kind, job.Environment.Name, job.OperationID)
+	if err := cfg.ensureCredentials(ctx, job); err != nil {
+		var missing missingCredentialsError
+		if errors.Is(err, errCredentialsDeferred) || errors.As(err, &missing) {
+			return err
+		}
+		return cfg.finishJob(ctx, job, err)
+	}
 	jobCtx, cancel := context.WithTimeout(ctx, 8*time.Minute)
 	defer cancel()
 	engine := runner.Engine{Call: cfg.call, Save: func(e *core.Environment) error {
@@ -955,7 +1020,25 @@ func (cfg runnerConfig) runJob(ctx context.Context, job runnerJob) error {
 	default:
 		err = errors.New("unknown job kind")
 	}
+	return cfg.finishJob(ctx, job, err)
+}
+
+func (cfg runnerConfig) finishJob(ctx context.Context, job runnerJob, err error) error {
 	runner.NoteFailure(&job.Environment, err)
+	if err != nil {
+		switch job.Environment.State {
+		case "READY", "DEGRADED", "FAILED", "DESTROYED", "RESIDUAL":
+		default:
+			if len(job.Environment.Resources) > 0 {
+				job.Environment.State = "DEGRADED"
+			} else {
+				job.Environment.State = "FAILED"
+			}
+			if job.Environment.LastError == "" {
+				job.Environment.LastError = "step failed; inspect runner logs"
+			}
+		}
+	}
 	report := struct {
 		Environment core.Environment `json:"environment"`
 		Success     bool             `json:"success"`

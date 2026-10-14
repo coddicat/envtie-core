@@ -27,6 +27,25 @@ type Field struct {
 	Availability string `json:"availability,omitempty"`
 }
 
+const (
+	// InputSecret is masked when a local runner prompts for it.
+	InputSecret = "secret"
+	// InputVariable is a non-secret provider setting, such as an account email.
+	InputVariable = "variable"
+	// InputContext is runner context, such as the repository a plan targets.
+	InputContext = "context"
+)
+
+// Input is one value an adapter reads from the runner process. The control
+// plane never receives the value. Required inputs are collected before the
+// first provider change.
+type Input struct {
+	Name        string `json:"name"`
+	Kind        string `json:"kind"`
+	Required    bool   `json:"required"`
+	Description string `json:"description,omitempty"`
+}
+
 type Manifest struct {
 	Name          string   `json:"name"`
 	Version       string   `json:"version"`
@@ -34,6 +53,41 @@ type Manifest struct {
 	Capabilities  []string `json:"capabilities"`
 	Outputs       []Field  `json:"outputs"`
 	CredentialEnv []string `json:"credential_env"`
+	Inputs        []Input  `json:"inputs,omitempty"`
+}
+
+// RuntimeInputs returns the typed inputs, or one required secret per legacy
+// credential name when an adapter has not declared Inputs.
+func (m Manifest) RuntimeInputs() []Input {
+	if len(m.Inputs) > 0 {
+		return m.Inputs
+	}
+	out := make([]Input, 0, len(m.CredentialEnv))
+	for _, name := range m.CredentialEnv {
+		out = append(out, Input{Name: name, Kind: InputSecret, Required: true})
+	}
+	return out
+}
+
+// EnvNames is every process variable copied into the adapter. Legacy
+// credential names and typed inputs are both included.
+func (m Manifest) EnvNames() []string {
+	seen := map[string]bool{}
+	names := make([]string, 0, len(m.CredentialEnv)+len(m.Inputs))
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	for _, name := range m.CredentialEnv {
+		add(name)
+	}
+	for _, input := range m.Inputs {
+		add(input.Name)
+	}
+	return names
 }
 
 type Request struct {
@@ -216,7 +270,7 @@ func (a Executable) Call(ctx context.Context, req Request) (Response, error) {
 		if manifest.Manifest == nil || manifest.Manifest.Protocol != ProtocolVersion {
 			return Response{}, errors.New("invalid adapter manifest")
 		}
-		for _, name := range manifest.Manifest.CredentialEnv {
+		for _, name := range manifest.Manifest.EnvNames() {
 			if !environmentName.MatchString(name) {
 				return Response{}, errors.New("invalid adapter environment declaration")
 			}
