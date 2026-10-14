@@ -31,7 +31,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
       - uses: actions/setup-go@v6
@@ -60,7 +60,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
       - uses: docker/setup-qemu-action@v3
@@ -101,7 +101,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
       - uses: actions/setup-node@v5
