@@ -3,11 +3,14 @@
 1. Require the `Core · required` check on `main`.
 2. Confirm `Docker smoke` and `Security` are green for the release commit.
 3. Update `CHANGELOG.md`.
-4. Create an annotated semantic-version tag and push it only after approval.
+4. Run **Tag release** on `main` with a new semantic version, for example
+   `v1.4.0-rc.3`. It refuses an existing tag and requires CI and Security to be
+   green for that commit. The latest Docker smoke run on `main` must also be
+   green. The workflow pushes the annotated tag and starts **Release**.
 5. Watch the Release workflow publish binaries, `adapters.json`, npm packages,
    attestations, and `ghcr.io/coddicat/envtie-runner`.
 6. Verify `SHA256SUMS.txt` and download one platform package.
-7. Update the private EnvTie.dev repository's pinned core version separately.
+7. Set `ENVTIE_RUNNER_VERSION` in the private EnvTie.dev repository to this tag.
 
 Creating a core release never deploys EnvTie.dev. Production deployment remains
 a manual action in the private repository.

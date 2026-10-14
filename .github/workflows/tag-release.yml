@@ -1,0 +1,83 @@
+name: Tag release
+
+# Creates one new envtie-core tag from current main and starts Release.
+# The default token cannot start the tag-push workflow, so this dispatches it.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: New tag, for example v1.4.0-rc.3. This becomes coddicat/envtie-core@<tag>.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-tag-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag main
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Tag the green main commit
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::Use a semantic version tag such as v1.4.0 or v1.4.0-rc.3"
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/${VERSION}" | grep -q .; then
+            echo "::error::${VERSION} already exists. Choose a new tag."
+            exit 1
+          fi
+          sha=$(git rev-parse HEAD)
+          require() {
+            workflow=$1
+            label=$2
+            conclusion=$(gh run list --workflow "$workflow" --branch main --commit "$sha" --limit 20 \
+              --json status,conclusion --jq '[.[] | select(.status=="completed")][0].conclusion // empty')
+            if [ "$conclusion" != success ]; then
+              echo "::error::${label} is not green for ${sha}"
+              exit 1
+            fi
+          }
+          require ci.yml "CI"
+          require security.yml "Security"
+          smoke=$(gh run list --workflow docker-smoke.yml --branch main --limit 20 \
+            --json status,conclusion,headSha --jq '[.[] | select(.status=="completed")][0] // empty')
+          if [ -z "$smoke" ]; then
+            echo "::error::Docker smoke has no completed run on main"
+            exit 1
+          fi
+          smoke_sha=$(printf '%s' "$smoke" | jq -r '.headSha')
+          smoke_conclusion=$(printf '%s' "$smoke" | jq -r '.conclusion')
+          if [ "$smoke_conclusion" != success ]; then
+            echo "::error::The latest Docker smoke run on main did not succeed"
+            exit 1
+          fi
+          if [ "$smoke_sha" != "$sha" ]; then
+            echo "Docker smoke last succeeded on ${smoke_sha}; this commit did not change the runner image inputs."
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "EnvTie Core ${VERSION}"
+          git push origin "refs/tags/${VERSION}"
+          gh workflow run release.yml --ref main -f "tag=${VERSION}"
+          {
+            echo "Tagged \`${sha}\` as \`${VERSION}\` and started Release."
+            echo "Set \`ENVTIE_RUNNER_VERSION=${VERSION}\` on EnvTie.dev so generated runner workflows use this tag."
+          } >> "$GITHUB_STEP_SUMMARY"
