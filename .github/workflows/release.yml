@@ -108,6 +108,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
+      - name: Use trusted-publishing npm client
+        run: npm install --global npm@latest
       - uses: actions/download-artifact@v4
         with:
           name: core-binaries
@@ -122,7 +124,7 @@ jobs:
 
   github:
     name: GitHub Release
-    needs: binaries
+    needs: [binaries, runner, npm]
     runs-on: ubuntu-latest
     permissions:
       contents: write
