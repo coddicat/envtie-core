@@ -46,6 +46,25 @@ func run(args []string) error {
 		return errors.New("usage: envtie preview apply|destroy|close <environment> [--run] | preview sweep [--run] | preview status <operation-id> | github setup | runner execute [--once] | blueprint validate [file] | plan | apply | status | outputs | destroy | version")
 	}
 	switch args[0] {
+	case "help", "-h", "--help":
+		fmt.Print(`EnvTie.dev CLI (public beta)
+
+Commands:
+  blueprint validate [file]      Validate a blueprint
+  plan | apply | retry           Manage a local environment
+  status | outputs | destroy     Inspect or destroy a local environment
+  preview apply|close|destroy    Run a custom-CI preview lifecycle
+  preview sweep | status         Reclaim or inspect previews
+  runner execute [--once]        Execute approved workspace jobs
+  adapter test <executable>      Validate a custom adapter
+  github setup                   Print a GitHub App manifest
+  version                        Print the CLI version
+
+Runner environment:
+  ENVTIE_API_URL, ENVTIE_RUNNER_TOKEN, ENVTIE_PUBLIC_KEY
+  plus only the provider values listed by the approved plan.
+`)
+		return nil
 	case "version", "--version":
 		fmt.Println(version)
 		return nil

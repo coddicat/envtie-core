@@ -1,0 +1,24 @@
+name: Bug report
+description: Report a reproducible, non-security problem
+body:
+  - type: markdown
+    attributes:
+      value: Never include credentials or customer data. Report vulnerabilities privately.
+  - type: input
+    id: version
+    attributes:
+      label: EnvTie version
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true

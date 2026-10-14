@@ -16,7 +16,7 @@ inputs:
     description: Control plane signing key shown in the dashboard; plans signed by any other key are rejected.
     required: true
   version:
-    description: EnvTie.dev release to install, for example v2.0.0. Defaults to the tag this action is referenced by.
+    description: EnvTie.dev release to install, for example v1.5.0-beta.1. Defaults to the tag this action is referenced by.
     required: false
     default: ""
   install-dir:
@@ -56,7 +56,7 @@ runs:
         set -euo pipefail
         version="${INPUT_VERSION:-$ACTION_REF}"
         if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
-          echo "::error::Set the 'version' input (for example v2.0.0) or reference the action by a release tag."
+          echo "::error::Set the 'version' input (for example v1.5.0-beta.1) or reference the action by a release tag."
           exit 1
         fi
         case "$RUNNER_OS" in

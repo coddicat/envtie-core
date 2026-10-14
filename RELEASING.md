@@ -1,5 +1,9 @@
 # Releasing EnvTie Core
 
+For `v1.5.0-beta.1`, configure npm trusted publishers for `@envtie.dev/cli` and all six platform packages, and grant
+this repository Actions write access to `ghcr.io/coddicat/envtie-runner`. The Release workflow is fail-closed: npm,
+GHCR, and binaries must all succeed before the GitHub Release is created.
+
 1. Require the `Core · required` check on `main`.
 2. Confirm `Docker smoke` and `Security` are green for the release commit.
 3. Update `CHANGELOG.md`.

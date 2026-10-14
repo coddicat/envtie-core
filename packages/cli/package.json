@@ -2,7 +2,17 @@
   "name": "@envtie.dev/cli",
   "version": "0.0.0-dev",
   "description": "EnvTie.dev customer runner launcher",
+  "author": "EnvTie.dev",
   "license": "Apache-2.0",
+  "homepage": "https://envtie.dev/docs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coddicat/envtie-core.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/coddicat/envtie-core/issues"
+  },
   "type": "module",
   "bin": {
     "envtie": "bin/envtie.js"
