@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -292,25 +291,123 @@ func TestRunnerWatchModeStopsOnCancel(t *testing.T) {
 	}
 }
 
-func TestPreviewExecuteRequiresDispatch(t *testing.T) {
-	err := previewExecuteCall(nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "--dispatch") {
-		t.Fatalf("err=%v", err)
+func TestPreviewRejectsRetiredHostedCommands(t *testing.T) {
+	for _, args := range [][]string{
+		{"execute"},
+		{"execute", "--dispatch", "22222222-2222-2222-2222-222222222222"},
+		{"report"},
+		{"report", "--dispatch", "22222222-2222-2222-2222-222222222222", "--status", "failure"},
+	} {
+		err := preview(args)
+		if err == nil {
+			t.Fatalf("preview %v succeeded", args)
+		}
+		message := strings.ToLower(err.Error())
+		if strings.Contains(message, "dispatch") || strings.Contains(message, "oidc") || strings.Contains(message, "actions") {
+			t.Fatalf("preview %v still describes the hosted path: %v", args, err)
+		}
+		if !strings.Contains(err.Error(), "preview apply") {
+			t.Fatalf("preview %v: %v", args, err)
+		}
 	}
 }
 
-func TestPreviewExecuteUsesGitHubOIDCAndExactCIRoute(t *testing.T) {
-	const (
-		requestToken = "request-token-secret"
-		oidcToken    = "oidc-jwt-secret"
-		session      = "epci_session-secret"
-		dispatchID   = "22222222-2222-2222-2222-222222222222"
-		operationID  = "11111111-1111-1111-1111-111111111111"
-	)
+func TestPreviewCommandsUseCustomCI(t *testing.T) {
 	var mu sync.Mutex
 	var paths []string
-	var sawAudience bool
-	reported := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.Method+" "+r.URL.RequestURI())
+		mu.Unlock()
+		if r.Header.Get("Authorization") != "Bearer et_project_key" {
+			t.Errorf("authorization %q", r.Header.Get("Authorization"))
+		}
+		switch r.URL.Path {
+		case "/v1/custom-ci/sweep":
+			_ = json.NewEncoder(w).Encode(map[string]any{"environments": []string{"pr-9"}})
+		case "/v1/custom-ci/operations/op-1":
+			_ = json.NewEncoder(w).Encode(previewOperation{OperationID: "op-1", Status: "completed"})
+		default:
+			_ = json.NewEncoder(w).Encode(previewOperation{OperationID: "op-1", Status: "queued"})
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("ENVTIE_API_URL", srv.URL)
+	t.Setenv("ENVTIE_API_KEY", "et_project_key")
+	t.Setenv("ENVTIE_CI_TOKEN", "")
+	for _, args := range [][]string{
+		{"apply", "pr-4"},
+		{"close", "pr-4"},
+		{"destroy", "pr-4"},
+		{"sweep"},
+		{"status", "op-1"},
+	} {
+		if err := preview(args); err != nil {
+			t.Fatalf("preview %v: %v", args, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	joined := strings.Join(paths, "\n")
+	for _, needle := range []string{
+		"POST /v1/custom-ci/environments/pr-4/apply",
+		"POST /v1/custom-ci/environments/pr-4/close",
+		"POST /v1/custom-ci/environments/pr-4/destroy",
+		"POST /v1/custom-ci/sweep",
+		"GET /v1/custom-ci/operations/op-1",
+	} {
+		if !strings.Contains(joined, needle) {
+			t.Fatalf("missing %s in\n%s", needle, joined)
+		}
+	}
+	for _, retired := range []string{"/v1/ci/", "/v1/github/actions", "/v1/runner/jobs"} {
+		if strings.Contains(joined, retired) {
+			t.Fatalf("preview commands used %s\n%s", retired, joined)
+		}
+	}
+}
+
+func TestPreviewApplyRunLeasesCustomCIOperation(t *testing.T) {
+	const operationID = "11111111-1111-1111-1111-111111111111"
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.RequestURI())
+		switch r.URL.Path {
+		case "/v1/custom-ci/environments/pr-4/apply":
+			if r.URL.RawQuery != "execute=1" {
+				t.Errorf("query %q", r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode(previewOperation{OperationID: operationID, Status: "queued"})
+		case "/v1/custom-ci/operations/" + operationID + "/lease":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("ENVTIE_API_URL", srv.URL)
+	t.Setenv("ENVTIE_API_KEY", "et_project_key")
+	t.Setenv("ENVTIE_CI_TOKEN", "")
+	err := preview([]string{"apply", "--run", "pr-4"})
+	if err == nil || err.Error() != "no job" {
+		t.Fatalf("err=%v", err)
+	}
+	joined := strings.Join(paths, "\n")
+	for _, needle := range []string{
+		"POST /v1/custom-ci/environments/pr-4/apply?execute=1",
+		"POST /v1/custom-ci/operations/" + operationID + "/lease",
+	} {
+		if !strings.Contains(joined, needle) {
+			t.Fatalf("missing %s in\n%s", needle, joined)
+		}
+	}
+}
+
+func TestCustomCILeaseCheckpointAndReport(t *testing.T) {
+	const operationID = "11111111-1111-1111-1111-111111111111"
+	var mu sync.Mutex
+	var paths []string
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -321,163 +418,70 @@ func TestPreviewExecuteUsesGitHubOIDCAndExactCIRoute(t *testing.T) {
 		mu.Lock()
 		paths = append(paths, r.Method+" "+r.URL.Path)
 		mu.Unlock()
-		switch {
-		case r.URL.Path == "/token":
-			if r.URL.Query().Get("audience") != "envtie" || r.Header.Get("Authorization") != "bearer "+requestToken {
-				t.Errorf("oidc request audience %q or authorization was wrong", r.URL.Query().Get("audience"))
-			}
-			mu.Lock()
-			sawAudience = true
-			mu.Unlock()
-			_ = json.NewEncoder(w).Encode(map[string]string{"value": oidcToken})
-		case r.URL.Path == "/v1/github/actions/exchange":
-			if r.Header.Get("Authorization") != "Bearer "+oidcToken {
-				t.Error("exchange did not present the GitHub OIDC token")
-			}
-			var body struct {
-				DispatchID string `json:"dispatch_id"`
-			}
-			if json.NewDecoder(r.Body).Decode(&body) != nil || body.DispatchID != dispatchID {
-				t.Error("exchange body")
-			}
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"session": session, "operation_id": operationID,
-				"public_key": base64.StdEncoding.EncodeToString(pub),
-			})
-		case r.URL.Path == "/v1/ci/jobs/"+operationID+"/lease":
-			if r.Header.Get("Authorization") != "Bearer "+session {
-				t.Error("lease did not use the CI session")
-			}
-			_ = json.NewEncoder(w).Encode(job)
-		case strings.HasPrefix(r.URL.Path, "/v1/ci/jobs/"+operationID+"/"):
-			if r.Header.Get("Authorization") != "Bearer "+session {
-				t.Error("ci callback did not use the CI session")
-			}
-			if strings.HasSuffix(r.URL.Path, "/report") {
-				mu.Lock()
-				reported = true
-				mu.Unlock()
-			}
+		if r.Header.Get("Authorization") != "Bearer ci-token" {
+			t.Errorf("authorization %q", r.Header.Get("Authorization"))
+		}
+		switch r.URL.Path {
+		case "/v1/custom-ci/operations/" + operationID + "/lease":
+			_ = json.NewEncoder(w).Encode(struct {
+				runnerJob
+				PublicKey string `json:"public_key"`
+			}{runnerJob: job, PublicKey: base64.StdEncoding.EncodeToString(pub)})
+		case "/v1/custom-ci/operations/" + operationID + "/checkpoint",
+			"/v1/custom-ci/operations/" + operationID + "/report":
 			w.WriteHeader(http.StatusNoContent)
-		case r.URL.Path == "/v1/ci/operations/"+operationID:
-			if r.Header.Get("Authorization") != "Bearer "+session {
-				t.Error("status did not use the CI session")
-			}
-			_ = json.NewEncoder(w).Encode(previewOperation{Status: "completed"})
 		default:
-			t.Errorf("unexpected path %s %s", r.Method, r.URL.Path)
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer srv.Close()
-	t.Setenv("ENVTIE_API_URL", srv.URL)
-	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", srv.URL+"/token")
-	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", requestToken)
-	stdout, stderr := os.Stdout, os.Stderr
-	outR, outW, _ := os.Pipe()
-	errR, errW, _ := os.Pipe()
-	os.Stdout, os.Stderr = outW, errW
-	call := func(_ context.Context, _ core.Component, req adapter.Request) (adapter.Response, error) {
-		switch req.Hook {
-		case "manifest":
-			return adapter.Response{Manifest: &adapter.Manifest{Name: "fake", Version: "1.0.0", Protocol: 1, Capabilities: []string{"read", "apply", "validate", "outputs", "destroy"}}}, nil
-		case "read":
-			return adapter.Response{Absent: true}, nil
-		case "apply":
-			return adapter.Response{ExternalID: "res-1", Status: "created"}, nil
-		case "validate":
-			return adapter.Response{Status: "ready"}, nil
-		case "outputs":
-			return adapter.Response{}, nil
-		default:
-			return adapter.Response{}, errors.New("unexpected hook")
-		}
+	cfg := runnerConfig{
+		base: srv.URL, token: "ci-token", client: srv.Client(),
+		jobsRoot: "/v1/custom-ci/operations", exactOperation: operationID,
+		call: func(_ context.Context, _ core.Component, req adapter.Request) (adapter.Response, error) {
+			switch req.Hook {
+			case "manifest":
+				return adapter.Response{Manifest: &adapter.Manifest{Name: "fake", Version: "1.0.0", Protocol: 1, Capabilities: []string{"read", "apply", "validate", "outputs", "destroy"}}}, nil
+			case "read":
+				return adapter.Response{Absent: true}, nil
+			case "apply":
+				return adapter.Response{ExternalID: "res-1", Status: "created"}, nil
+			case "validate":
+				return adapter.Response{Status: "ready"}, nil
+			case "outputs":
+				return adapter.Response{}, nil
+			default:
+				return adapter.Response{}, errors.New("unexpected hook")
+			}
+		},
 	}
-	err = previewExecuteCall([]string{"--dispatch", dispatchID, "--timeout", "30s"}, call)
-	outW.Close()
-	errW.Close()
-	os.Stdout, os.Stderr = stdout, stderr
-	out, _ := io.ReadAll(outR)
-	errOut, _ := io.ReadAll(errR)
-	combined := string(out) + string(errOut)
+	leased, err := cfg.lease(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sawAudience {
-		t.Fatal("GitHub OIDC audience was not requested")
+	if leased.OperationID != operationID {
+		t.Fatalf("leased %s", leased.OperationID)
 	}
-	for _, secret := range []string{requestToken, oidcToken, session} {
-		if strings.Contains(combined, secret) {
-			t.Fatalf("command output included a credential")
-		}
-	}
-	if !strings.Contains(string(out), operationID) || !strings.Contains(string(out), "completed") {
-		t.Fatalf("stdout %q", out)
+	if err := cfg.runJob(context.Background(), leased); err != nil {
+		t.Fatal(err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if !reported {
-		t.Fatal("operation was not reported")
-	}
 	joined := strings.Join(paths, "\n")
 	for _, needle := range []string{
-		"GET /token",
-		"POST /v1/github/actions/exchange",
-		"POST /v1/ci/jobs/" + operationID + "/lease",
-		"POST /v1/ci/jobs/" + operationID + "/checkpoint",
-		"POST /v1/ci/jobs/" + operationID + "/report",
-		"GET /v1/ci/operations/" + operationID,
+		"POST /v1/custom-ci/operations/" + operationID + "/lease",
+		"POST /v1/custom-ci/operations/" + operationID + "/checkpoint",
+		"POST /v1/custom-ci/operations/" + operationID + "/report",
 	} {
 		if !strings.Contains(joined, needle) {
 			t.Fatalf("missing %s in\n%s", needle, joined)
 		}
 	}
-	if strings.Contains(joined, "/v1/runner/jobs") {
-		t.Fatal("preview execute used the workspace runner queue")
-	}
-}
-
-func TestPreviewReportUsesFreshGitHubOIDC(t *testing.T) {
-	const (
-		requestToken = "request-token-secret"
-		oidcToken    = "report-oidc-secret"
-		dispatchID   = "22222222-2222-2222-2222-222222222222"
-	)
-	sawReport := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/token":
-			if r.URL.Query().Get("audience") != "envtie" || r.Header.Get("Authorization") != "bearer "+requestToken {
-				t.Error("invalid OIDC request")
-			}
-			_ = json.NewEncoder(w).Encode(map[string]string{"value": oidcToken})
-		case "/v1/github/actions/report":
-			if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer "+oidcToken {
-				t.Error("report did not present the GitHub OIDC token")
-			}
-			var in struct {
-				DispatchID string `json:"dispatch_id"`
-				Status     string `json:"status"`
-			}
-			if json.NewDecoder(r.Body).Decode(&in) != nil || in.DispatchID != dispatchID || in.Status != "failure" {
-				t.Errorf("report body: %+v", in)
-			}
-			sawReport = true
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Errorf("unexpected path %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
+	for _, retired := range []string{"/v1/ci/", "/v1/github/actions", "/v1/runner/jobs"} {
+		if strings.Contains(joined, retired) {
+			t.Fatalf("custom CI job used %s\n%s", retired, joined)
 		}
-	}))
-	defer srv.Close()
-	t.Setenv("ENVTIE_API_URL", srv.URL)
-	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", srv.URL+"/token")
-	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", requestToken)
-	if err := previewReport([]string{"--dispatch", dispatchID, "--status", "failure"}); err != nil {
-		t.Fatal(err)
-	}
-	if !sawReport {
-		t.Fatal("preview result was not reported")
 	}
 }
 
