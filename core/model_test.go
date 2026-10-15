@@ -75,7 +75,7 @@ func TestGitHubBindingsRequireTheGitHubProvider(t *testing.T) {
 	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "github@1") {
 		t.Fatal(err)
 	}
-	b.Components = append(b.Components, Component{ID: "github", Adapter: "github@1", Ownership: Managed, Config: map[string]string{"deployment": "true"}})
+	b.Components = append(b.Components, Component{ID: "github", Adapter: "github@1", Ownership: Managed, Config: map[string]string{"deployment": "true", "repository": "acme/app"}})
 	if err := b.Validate(); err != nil {
 		t.Fatal(err)
 	}

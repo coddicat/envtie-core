@@ -20,6 +20,25 @@ func TestConnectionValues(t *testing.T) {
 	}
 }
 
+func TestMaskedStepPrintsStarsAndHonorsBackspace(t *testing.T) {
+	buf, echo, done, interrupt := maskedStep(nil, 'a')
+	if string(buf) != "a" || echo != "*" || done || interrupt {
+		t.Fatalf("type: %q %q %v %v", buf, echo, done, interrupt)
+	}
+	buf, echo, done, interrupt = maskedStep(buf, 127)
+	if len(buf) != 0 || echo != "\b \b" || done || interrupt {
+		t.Fatalf("backspace: %q %q %v %v", buf, echo, done, interrupt)
+	}
+	buf, echo, done, interrupt = maskedStep([]byte("ab"), '\r')
+	if string(buf) != "ab" || echo != "\r\n" || !done || interrupt {
+		t.Fatalf("enter: %q %q %v %v", buf, echo, done, interrupt)
+	}
+	_, _, done, interrupt = maskedStep([]byte("a"), 3)
+	if done || !interrupt {
+		t.Fatal("ctrl+c should interrupt")
+	}
+}
+
 func TestAcceptableCredentialRejectsEmptyAndMultilineValues(t *testing.T) {
 	if !acceptableCredential("ep_rt_example") {
 		t.Fatal("expected a normal value")

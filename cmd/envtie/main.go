@@ -851,7 +851,6 @@ func executeRunner(ctx context.Context, cfg runnerConfig) error {
 	} else {
 		fmt.Fprintln(os.Stderr, "runner: polling", cfg.base, "for jobs (Ctrl+C to stop)")
 	}
-	unauthorized := false
 	done, failed := 0, 0
 	if cfg.notified == nil {
 		cfg.notified = map[string]struct{}{}
@@ -874,14 +873,14 @@ func executeRunner(ctx context.Context, cfg runnerConfig) error {
 		}
 		var status *leaseStatusError
 		if errors.As(err, &status) && status.code == 401 {
-			if cfg.once {
+			if !runnerCanPrompt() {
 				return errors.New("runner token rejected (revoked, expired, or issued by another control plane)")
 			}
-			if !unauthorized {
-				fmt.Fprintln(os.Stderr, "runner: token rejected (revoked, expired, or wrong control plane); retrying")
-				unauthorized = true
+			fmt.Fprintln(os.Stderr, "runner: token rejected (revoked, expired, or issued by another control plane)")
+			if err := promptEnvValue("ENVTIE_RUNNER_TOKEN", "runner token", true, strings.TrimSpace, acceptableCredential); err != nil {
+				return err
 			}
-			pause(ctx, 2*cfg.idle)
+			cfg.token = os.Getenv("ENVTIE_RUNNER_TOKEN")
 			continue
 		}
 		if err != nil {
@@ -894,7 +893,6 @@ func executeRunner(ctx context.Context, cfg runnerConfig) error {
 			pause(ctx, cfg.idle)
 			continue
 		}
-		unauthorized = false
 		if err := cfg.runJob(ctx, job); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -1034,8 +1032,9 @@ func (cfg runnerConfig) runJob(ctx context.Context, job runnerJob) error {
 		}
 		return nil
 	}}
+	repository := planRepository(job.Plan.Actions)
 	engine.Deliver = func(ctx context.Context, destination, value string) error {
-		return cfg.deliverGitHubEnvironment(ctx, job.Environment.Name, destination, value)
+		return cfg.deliverGitHubEnvironment(ctx, job.Environment.Name, destination, value, repository)
 	}
 	var err error
 	switch job.Kind {
@@ -1127,7 +1126,16 @@ func (cfg runnerConfig) send(ctx context.Context, method, path string, payload a
 
 var githubAPI = "https://api.github.com"
 
-func (cfg runnerConfig) deliverGitHubEnvironment(ctx context.Context, environment, destination, value string) error {
+func planRepository(actions []core.Action) string {
+	for _, action := range actions {
+		if repository := strings.TrimSpace(action.Component.Config["repository"]); repository != "" {
+			return repository
+		}
+	}
+	return ""
+}
+
+func (cfg runnerConfig) deliverGitHubEnvironment(ctx context.Context, environment, destination, value, repository string) error {
 	kind, name, ok := core.GitHubBinding(destination)
 	if !ok {
 		return errors.New("unsupported GitHub Environment binding")
@@ -1136,7 +1144,9 @@ func (cfg runnerConfig) deliverGitHubEnvironment(ctx context.Context, environmen
 		return errors.New("github_fork_secrets_unavailable")
 	}
 	token := os.Getenv("GITHUB_TOKEN")
-	repository := os.Getenv("GITHUB_REPOSITORY")
+	if strings.TrimSpace(repository) == "" {
+		repository = os.Getenv("GITHUB_REPOSITORY")
+	}
 	owner, repo, found := strings.Cut(repository, "/")
 	if token == "" || !found || owner == "" || repo == "" || environment == "" {
 		return errors.New("GitHub Environment delivery unavailable")

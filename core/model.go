@@ -126,6 +126,7 @@ type Environment struct {
 
 var identifier = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 var adapterName = regexp.MustCompile(`^[a-z][a-z0-9-]*@[0-9]+$`)
+var repositoryName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 var bindingName = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,99}$`)
 
 // GitHubBinding parses a GitHub Environment destination. Secret and variable
@@ -242,6 +243,9 @@ func (b Blueprint) Validate() error {
 			if strings.Contains(lower, "password") || strings.Contains(lower, "token") || strings.Contains(lower, "secret") || strings.Contains(lower, "api_key") || strings.Contains(value, "://") {
 				return fmt.Errorf("%s: config contains a secret-shaped field; use runner environment", c.ID)
 			}
+		}
+		if c.Adapter == "github@1" && c.Ownership == Managed && !repositoryName.MatchString(c.Config["repository"]) {
+			return fmt.Errorf("%s: repository must be owner/name", c.ID)
 		}
 		seen[c.ID] = c
 	}

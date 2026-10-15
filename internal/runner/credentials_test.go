@@ -50,7 +50,7 @@ func TestCredentialGapsCollectsMissingInputsBeforeApply(t *testing.T) {
 	for _, gap := range gaps {
 		got[gap.Name] = gap.Kind
 	}
-	for _, name := range []string{"UPSTASH_API_KEY", "GITHUB_TOKEN", "GITHUB_REPOSITORY", "GITHUB_SHA"} {
+	for _, name := range []string{"UPSTASH_API_KEY", "GITHUB_TOKEN", "GITHUB_REPOSITORY"} {
 		if _, ok := got[name]; !ok {
 			t.Fatalf("missing %s in %v", name, got)
 		}
@@ -60,6 +60,33 @@ func TestCredentialGapsCollectsMissingInputsBeforeApply(t *testing.T) {
 	}
 	if got["UPSTASH_API_KEY"] != adapter.InputSecret || got["GITHUB_REPOSITORY"] != adapter.InputContext {
 		t.Fatalf("kinds: %v", got)
+	}
+	if _, ok := got["GITHUB_SHA"]; ok {
+		t.Fatal("an environment without a pull request asked for a commit")
+	}
+}
+
+func TestCredentialGapsUsesTheBlueprintRepository(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_REPOSITORY", "")
+	t.Setenv("GITHUB_SHA", "")
+	engine := Engine{Call: manifestCall(map[string]adapter.Manifest{
+		"github@1": {Name: "github", Version: "1.0.0", Protocol: 1, Capabilities: []string{"read", "apply", "validate", "outputs", "destroy"}, Inputs: []adapter.Input{
+			{Name: "GITHUB_TOKEN", Kind: adapter.InputSecret, Required: true},
+			{Name: "GITHUB_REPOSITORY", Kind: adapter.InputContext, Required: true},
+			{Name: "GITHUB_SHA", Kind: adapter.InputContext, Required: false},
+		}},
+	})}
+	actions := []core.Action{{Component: core.Component{ID: "github", Adapter: "github@1", Ownership: core.Managed, Config: map[string]string{
+		"repository": "acme/shop", "deployment": "true",
+	}}}}
+	bindings := []core.Binding{{From: "github.ENVIRONMENT_NAME", To: "github.environment.variable.ENVIRONMENT_NAME"}}
+	gaps, err := engine.CredentialGaps(context.Background(), actions, bindings, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gaps) != 1 || gaps[0].Name != "GITHUB_TOKEN" {
+		t.Fatalf("gaps: %+v", gaps)
 	}
 }
 

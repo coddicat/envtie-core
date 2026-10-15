@@ -281,6 +281,19 @@ func TestRunnerOnceFailsFastOnBadTokenOrOutage(t *testing.T) {
 	}
 }
 
+func TestRunnerWatchModeStopsWhenTokenRejected(t *testing.T) {
+	cp := &fakeControlPlane{status: 401}
+	cfg, _ := testRunner(t, cp)
+	cfg.once = false
+	err := executeRunner(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "token rejected") {
+		t.Fatalf("err=%v", err)
+	}
+	if leases, _, _ := cp.snapshot(); leases != 1 {
+		t.Fatalf("rejected token retried, leases=%d", leases)
+	}
+}
+
 func TestRunnerWatchModeStopsOnCancel(t *testing.T) {
 	cp := &fakeControlPlane{}
 	cfg, _ := testRunner(t, cp)
@@ -587,11 +600,11 @@ func TestGitHubEnvironmentSecretIsSealedForGitHub(t *testing.T) {
 	}))
 	defer srv.Close()
 	t.Setenv("GITHUB_TOKEN", "installation-token")
-	t.Setenv("GITHUB_REPOSITORY", "acme/app")
+	t.Setenv("GITHUB_REPOSITORY", "")
 	githubAPI = srv.URL
 	t.Cleanup(func() { githubAPI = "https://api.github.com" })
 	cfg := runnerConfig{}
-	if err := cfg.deliverGitHubEnvironment(context.Background(), "pr-7", "github.environment.secret.DATABASE_URL", secret); err != nil {
+	if err := cfg.deliverGitHubEnvironment(context.Background(), "pr-7", "github.environment.secret.DATABASE_URL", secret, "acme/app"); err != nil {
 		t.Fatal(err)
 	}
 	if decrypted != secret {
@@ -612,7 +625,7 @@ func TestGitHubEnvironmentDeliveryDoesNotCreate(t *testing.T) {
 	t.Setenv("GITHUB_REPOSITORY", "acme/app")
 	githubAPI = srv.URL
 	t.Cleanup(func() { githubAPI = "https://api.github.com" })
-	err := (runnerConfig{}).deliverGitHubEnvironment(context.Background(), "pr-7", "github.environment.secret.DATABASE_URL", "secret")
+	err := (runnerConfig{}).deliverGitHubEnvironment(context.Background(), "pr-7", "github.environment.secret.DATABASE_URL", "secret", "")
 	if err == nil || created {
 		t.Fatalf("missing environment was created: err=%v created=%v", err, created)
 	}
@@ -622,7 +635,7 @@ func TestGitHubForkDeliveryFails(t *testing.T) {
 	t.Setenv("ENVTIE_FORK", "true")
 	t.Setenv("GITHUB_TOKEN", "installation-token")
 	t.Setenv("GITHUB_REPOSITORY", "acme/app")
-	err := (runnerConfig{}).deliverGitHubEnvironment(context.Background(), "pr-7", "github.environment.secret.DATABASE_URL", "secret")
+	err := (runnerConfig{}).deliverGitHubEnvironment(context.Background(), "pr-7", "github.environment.secret.DATABASE_URL", "secret", "")
 	if err == nil || err.Error() != "github_fork_secrets_unavailable" {
 		t.Fatal(err)
 	}

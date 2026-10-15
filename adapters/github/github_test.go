@@ -77,6 +77,43 @@ func TestEnvironmentLifecycle(t *testing.T) {
 	}
 }
 
+func TestApplyWithoutPullRequestCreatesTheEnvironmentOnly(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "installation-token")
+	t.Setenv("GITHUB_SHA", "")
+	oldClient := httpclient.Client
+	oldAPI := githubAPI
+	t.Cleanup(func() {
+		httpclient.Client = oldClient
+		githubAPI = oldAPI
+	})
+	githubAPI = "https://github.test"
+	httpclient.Client = &http.Client{Transport: roundTrip(func(r *http.Request) (int, string) {
+		if strings.Contains(r.URL.Path, "/deployments") {
+			t.Errorf("environment without a pull request recorded a deployment: %s", r.URL.Path)
+		}
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/environments/staging"):
+			return http.StatusNotFound, `{"message":"Not Found"}`
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/environments/staging"):
+			return http.StatusOK, `{"name":"staging"}`
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/variables/"):
+			return http.StatusNotFound, `{}`
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/variables"):
+			return http.StatusCreated, `{}`
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			return http.StatusNotFound, `{}`
+		}
+	})}
+	resp, err := (Handler{}).Handle(context.Background(), adapter.Request{
+		Hook: "apply", Environment: "staging",
+		Config: map[string]string{"repository": "acme/app", "deployment": "true"},
+	})
+	if err != nil || resp.ExternalID != "staging" {
+		t.Fatalf("apply %+v %v", resp, err)
+	}
+}
+
 func TestManagedResourceNameDoesNotCreateASecondEnvironment(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "installation-token")
 	oldClient := httpclient.Client

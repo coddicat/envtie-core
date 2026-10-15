@@ -36,23 +36,31 @@ func (e Engine) CredentialGaps(ctx context.Context, actions []core.Action, bindi
 			if !validCredentialName(in.Name) || !validCredentialKind(in.Kind) {
 				return nil, fmt.Errorf("%s: invalid credential declaration", action.Component.ID)
 			}
-			required := in.Required
-			if in.Name == "GITHUB_SHA" && action.Component.Config["deployment"] == "true" && action.Component.Config["head_sha"] == "" {
-				required = true
+			if in.Name == "GITHUB_REPOSITORY" && strings.TrimSpace(action.Component.Config["repository"]) != "" {
+				continue
 			}
-			if !required {
+			if in.Name == "GITHUB_SHA" || !in.Required {
 				continue
 			}
 			add(in)
 		}
 	}
 	if includeDelivery {
+		repository := ""
+		for _, action := range actions {
+			if repo := strings.TrimSpace(action.Component.Config["repository"]); repo != "" {
+				repository = repo
+				break
+			}
+		}
 		for _, binding := range bindings {
 			if _, _, ok := core.GitHubBinding(binding.To); !ok {
 				continue
 			}
 			add(adapter.Input{Name: "GITHUB_TOKEN", Kind: adapter.InputSecret, Required: true, Description: "GitHub App installation token"})
-			add(adapter.Input{Name: "GITHUB_REPOSITORY", Kind: adapter.InputContext, Required: true, Description: "Repository owner/name"})
+			if repository == "" {
+				add(adapter.Input{Name: "GITHUB_REPOSITORY", Kind: adapter.InputContext, Required: true, Description: "Repository owner/name"})
+			}
 			break
 		}
 	}

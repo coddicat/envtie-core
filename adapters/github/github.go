@@ -32,7 +32,7 @@ func (Handler) Manifest() adapter.Manifest {
 		Inputs: []adapter.Input{
 			{Name: "GITHUB_TOKEN", Kind: adapter.InputSecret, Required: true, Description: "GitHub App installation token"},
 			{Name: "GITHUB_REPOSITORY", Kind: adapter.InputContext, Required: true, Description: "Repository owner/name"},
-			{Name: "GITHUB_SHA", Kind: adapter.InputContext, Required: false, Description: "Commit recorded when the plan requests a deployment"},
+			{Name: "GITHUB_SHA", Kind: adapter.InputContext, Required: false, Description: "Commit supplied by GitHub Actions for a pull request"},
 		},
 		Outputs: []adapter.Field{
 			{Name: "ENVIRONMENT_NAME", Sensitivity: "PUBLIC"},
@@ -153,7 +153,7 @@ func applyEnvironment(ctx context.Context, base, auth, name string, r adapter.Re
 	if err := ensureMarker(ctx, base, auth); err != nil {
 		return adapter.Response{}, err
 	}
-	if r.Config["deployment"] == "true" {
+	if r.Config["deployment"] == "true" && deploymentCommit(r) != "" {
 		if err := recordDeployment(ctx, base, auth, name, r); err != nil {
 			return adapter.Response{}, err
 		}
@@ -223,11 +223,15 @@ func ensureMarker(ctx context.Context, base, auth string) error {
 	return nil
 }
 
-func recordDeployment(ctx context.Context, environmentAPI, auth, name string, r adapter.Request) error {
-	sha := r.Config["head_sha"]
-	if sha == "" {
-		sha = os.Getenv("GITHUB_SHA")
+func deploymentCommit(r adapter.Request) string {
+	if sha := strings.TrimSpace(r.Config["head_sha"]); sha != "" {
+		return sha
 	}
+	return strings.TrimSpace(os.Getenv("GITHUB_SHA"))
+}
+
+func recordDeployment(ctx context.Context, environmentAPI, auth, name string, r adapter.Request) error {
+	sha := deploymentCommit(r)
 	if sha == "" {
 		return adapter.NewError("github_sha_required")
 	}

@@ -12,6 +12,7 @@ components:
     ownership: managed
     depends_on: [postgres]
     config:
+      repository: owner/name
       deployment: "true"
 bindings:
   - from: postgres.DATABASE_URL
