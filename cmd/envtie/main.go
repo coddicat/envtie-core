@@ -838,6 +838,7 @@ type runnerJob struct {
 	Kind        string           `json:"kind"`
 	Plan        core.Plan        `json:"plan"`
 	Environment core.Environment `json:"environment"`
+	GitHubAppID int64            `json:"github_app_id,omitempty"`
 }
 
 var errNoJob = errors.New("no job")
@@ -965,17 +966,24 @@ func (cfg *runnerConfig) lease(ctx context.Context) (runnerJob, error) {
 }
 
 func (cfg runnerConfig) ensureCredentials(ctx context.Context, job runnerJob) error {
+	expireMintedGitHubToken()
 	engine := runner.Engine{Call: cfg.call}
 	gaps, err := engine.CredentialGaps(ctx, job.Plan.Actions, job.Plan.Bindings, job.Kind == "apply")
 	if err != nil {
 		return err
 	}
-	if len(gaps) > 0 && runnerCanPrompt() {
-		_ = promptForCredentials(gaps)
+	gaps = supplyGitHubToken(ctx, job, gaps)
+	promptGaps := gaps
+	if os.Getenv("GITHUB_ACTIONS") != "true" {
+		promptGaps = withoutGap(gaps, "GITHUB_TOKEN")
+	}
+	if len(promptGaps) > 0 && runnerCanPrompt() {
+		_ = promptForCredentials(promptGaps)
 		gaps, err = engine.CredentialGaps(ctx, job.Plan.Actions, job.Plan.Bindings, job.Kind == "apply")
 		if err != nil {
 			return err
 		}
+		gaps = supplyGitHubToken(ctx, job, gaps)
 	}
 	if len(gaps) == 0 {
 		return nil
@@ -984,6 +992,9 @@ func (cfg runnerConfig) ensureCredentials(ctx context.Context, job runnerJob) er
 		cfg.notified[job.OperationID] = struct{}{}
 	}
 	explainMissingCredentials(job.Environment.Name, gaps)
+	if gapNamed(gaps, "GITHUB_TOKEN") && os.Getenv("GITHUB_ACTIONS") != "true" {
+		explainGitHubToken(job)
+	}
 	if err := cfg.releaseLease(ctx, job.OperationID); err != nil {
 		fmt.Fprintln(os.Stderr, "runner: the approval stays leased until it expires")
 	}

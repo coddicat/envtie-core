@@ -19,6 +19,7 @@ components:
     ownership: managed
     depends_on: [postgres]
     config:
+      email: REPLACE_WITH_UPSTASH_EMAIL
       platform: aws
       primary_region: us-east-1
   - id: github

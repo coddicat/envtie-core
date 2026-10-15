@@ -66,6 +66,25 @@ func TestCredentialGapsCollectsMissingInputsBeforeApply(t *testing.T) {
 	}
 }
 
+func TestCredentialGapsUsesTheBlueprintEmail(t *testing.T) {
+	t.Setenv("UPSTASH_EMAIL", "")
+	t.Setenv("UPSTASH_API_KEY", "")
+	engine := Engine{Call: manifestCall(map[string]adapter.Manifest{
+		"upstash@1": {Name: "upstash", Version: "1.0.0", Protocol: 1, Capabilities: []string{"read", "apply", "validate", "outputs", "destroy"}, Inputs: []adapter.Input{
+			{Name: "UPSTASH_EMAIL", Kind: adapter.InputVariable, Required: true},
+			{Name: "UPSTASH_API_KEY", Kind: adapter.InputSecret, Required: true},
+		}},
+	})}
+	actions := []core.Action{{Component: core.Component{ID: "cache", Adapter: "upstash@1", Ownership: core.Managed, Config: map[string]string{"email": "person@example.com"}}}}
+	gaps, err := engine.CredentialGaps(context.Background(), actions, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gaps) != 1 || gaps[0].Name != "UPSTASH_API_KEY" {
+		t.Fatalf("gaps: %+v", gaps)
+	}
+}
+
 func TestCredentialGapsUsesTheBlueprintRepository(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GITHUB_REPOSITORY", "")

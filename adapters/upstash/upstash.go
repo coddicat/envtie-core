@@ -18,7 +18,7 @@ func (Handler) Manifest() adapter.Manifest {
 		Capabilities:  []string{"read", "apply", "validate", "outputs", "destroy"},
 		CredentialEnv: []string{"UPSTASH_EMAIL", "UPSTASH_API_KEY"},
 		Inputs: []adapter.Input{
-			{Name: "UPSTASH_EMAIL", Kind: adapter.InputVariable, Required: true, Description: "Upstash account email"},
+			{Name: "UPSTASH_EMAIL", Kind: adapter.InputVariable, Required: true, Description: "Upstash account email. Prefer config email; this variable is only a fallback."},
 			{Name: "UPSTASH_API_KEY", Kind: adapter.InputSecret, Required: true, Description: "Upstash API key"},
 		},
 		Outputs: []adapter.Field{{Name: "REDIS_URL", Sensitivity: "SECRET"}, {Name: "UPSTASH_REDIS_REST_URL", Sensitivity: "PUBLIC"}, {Name: "UPSTASH_REDIS_REST_TOKEN", Sensitivity: "SECRET"}},
@@ -32,7 +32,7 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 	if err := preflight(r); err != nil {
 		return adapter.Response{}, err
 	}
-	email, key := os.Getenv("UPSTASH_EMAIL"), os.Getenv("UPSTASH_API_KEY")
+	email, key := accountEmail(r), os.Getenv("UPSTASH_API_KEY")
 	auth := "Basic " + basic(email, key)
 	base := "https://api.upstash.com/v2/redis"
 	switch r.Hook {
@@ -127,13 +127,20 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 	return adapter.Response{}, adapter.NewError("upstash_invalid_request")
 }
 
+func accountEmail(r adapter.Request) string {
+	if email := strings.TrimSpace(r.Config["email"]); email != "" {
+		return email
+	}
+	return strings.TrimSpace(os.Getenv("UPSTASH_EMAIL"))
+}
+
 func preflight(r adapter.Request) error {
 	switch r.Hook {
 	case "read", "apply", "validate", "outputs", "destroy":
 	default:
 		return adapter.NewError("upstash_invalid_request")
 	}
-	if os.Getenv("UPSTASH_EMAIL") == "" || os.Getenv("UPSTASH_API_KEY") == "" {
+	if accountEmail(r) == "" || os.Getenv("UPSTASH_API_KEY") == "" {
 		return adapter.NewError("upstash_credential_missing")
 	}
 	switch r.Hook {

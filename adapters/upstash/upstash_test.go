@@ -182,6 +182,18 @@ func useUpstashTransport(t *testing.T, rt fakeTransport) {
 	httpclient.Client = &http.Client{Transport: rt}
 }
 
+func TestAccountEmailPrefersTheBlueprint(t *testing.T) {
+	t.Setenv("UPSTASH_EMAIL", "")
+	t.Setenv("UPSTASH_API_KEY", "upstash-fixture-key")
+	req := adapter.Request{Hook: "read", ExternalID: "db-1", Config: map[string]string{"email": "plan@example.com", "name": "cache"}}
+	if err := preflight(req); err != nil {
+		t.Fatal(err)
+	}
+	if accountEmail(req) != "plan@example.com" {
+		t.Fatal(accountEmail(req))
+	}
+}
+
 func assertNoLeak(t *testing.T, err error) {
 	t.Helper()
 	seen := map[error]bool{}

@@ -39,6 +39,9 @@ func (e Engine) CredentialGaps(ctx context.Context, actions []core.Action, bindi
 			if in.Name == "GITHUB_REPOSITORY" && strings.TrimSpace(action.Component.Config["repository"]) != "" {
 				continue
 			}
+			if in.Name == "UPSTASH_EMAIL" && strings.TrimSpace(action.Component.Config["email"]) != "" {
+				continue
+			}
 			if in.Name == "GITHUB_SHA" || !in.Required {
 				continue
 			}
