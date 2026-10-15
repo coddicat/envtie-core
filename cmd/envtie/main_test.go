@@ -139,11 +139,12 @@ func TestAutomationRequestUsesScopedTokenAndReturnsSafeErrors(t *testing.T) {
 }
 
 type fakeControlPlane struct {
-	mu      sync.Mutex
-	jobs    []any
-	status  int
-	reports []bool
-	leases  int
+	mu       sync.Mutex
+	jobs     []any
+	status   int
+	reports  []bool
+	leases   int
+	releases int
 }
 
 func (f *fakeControlPlane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -169,6 +170,9 @@ func (f *fakeControlPlane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(job)
 	case strings.HasSuffix(r.URL.Path, "/checkpoint"):
 		w.WriteHeader(204)
+	case strings.HasSuffix(r.URL.Path, "/release"):
+		f.releases++
+		w.WriteHeader(204)
 	case strings.HasSuffix(r.URL.Path, "/report"):
 		var report struct {
 			Success bool `json:"success"`
@@ -181,10 +185,10 @@ func (f *fakeControlPlane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (f *fakeControlPlane) snapshot() (int, []bool) {
+func (f *fakeControlPlane) snapshot() (int, []bool, int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.leases, append([]bool(nil), f.reports...)
+	return f.leases, append([]bool(nil), f.reports...), f.releases
 }
 
 func testRunner(t *testing.T, cp *fakeControlPlane) (runnerConfig, ed25519.PrivateKey) {
@@ -232,7 +236,7 @@ func TestRunnerOnceExitsWhenNoWork(t *testing.T) {
 	if err := executeRunner(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if leases, _ := cp.snapshot(); leases != 1 {
+	if leases, _, _ := cp.snapshot(); leases != 1 {
 		t.Fatalf("leases=%d, want exactly one check", leases)
 	}
 }
@@ -244,7 +248,7 @@ func TestRunnerOnceDrainsWaitingJobs(t *testing.T) {
 	if err := executeRunner(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if _, reports := cp.snapshot(); len(reports) != 2 || !reports[0] || !reports[1] {
+	if _, reports, _ := cp.snapshot(); len(reports) != 2 || !reports[0] || !reports[1] {
 		t.Fatalf("reports=%v", reports)
 	}
 }
@@ -258,7 +262,7 @@ func TestRunnerOnceFailsOnRejectedPlan(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "1 of 1 job(s) failed") {
 		t.Fatalf("err=%v", err)
 	}
-	if _, reports := cp.snapshot(); len(reports) != 0 {
+	if _, reports, _ := cp.snapshot(); len(reports) != 0 {
 		t.Fatal("a plan with an invalid signature must never run or report")
 	}
 }
@@ -286,8 +290,50 @@ func TestRunnerWatchModeStopsOnCancel(t *testing.T) {
 	if err := executeRunner(ctx, cfg); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v", err)
 	}
-	if leases, _ := cp.snapshot(); leases < 2 {
+	if leases, _, _ := cp.snapshot(); leases < 2 {
 		t.Fatalf("watch mode should keep polling, leases=%d", leases)
+	}
+}
+
+func TestRunnerStopReleasesLeaseWithoutReporting(t *testing.T) {
+	cp := &fakeControlPlane{}
+	cfg, priv := testRunner(t, cp)
+	cfg.once = false
+	cp.jobs = []any{signedJob(t, priv, "held")}
+	started := make(chan struct{})
+	cfg.call = func(ctx context.Context, _ core.Component, r adapter.Request) (adapter.Response, error) {
+		switch r.Hook {
+		case "manifest":
+			return adapter.Response{Manifest: &adapter.Manifest{Name: "fake", Version: "1.0.0", Protocol: 1, Capabilities: []string{"read", "apply", "validate", "outputs", "destroy"}}}, nil
+		case "read":
+			return adapter.Response{Absent: true}, nil
+		case "apply":
+			close(started)
+			<-ctx.Done()
+			return adapter.Response{}, ctx.Err()
+		default:
+			return adapter.Response{}, errors.New("unexpected hook")
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- executeRunner(ctx, cfg) }()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("apply did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err=%v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runner did not stop")
+	}
+	if _, reports, releases := cp.snapshot(); len(reports) != 0 || releases != 1 {
+		t.Fatalf("reports=%v releases=%d", reports, releases)
 	}
 }
 

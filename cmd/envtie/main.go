@@ -62,7 +62,8 @@ Commands:
 
 Runner environment:
   ENVTIE_API_URL, ENVTIE_RUNNER_TOKEN, ENVTIE_PUBLIC_KEY
-  plus only the provider values listed by the approved plan.
+  An interactive terminal prompts for any of these that are unset.
+  Provider values are prompted when an approved plan needs them.
 `)
 		return nil
 	case "version", "--version":
@@ -114,6 +115,9 @@ Runner environment:
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
+		if err := promptRunnerConnection(); err != nil {
+			return err
+		}
 		cfg, err := runnerConfigFromEnv()
 		if err != nil {
 			return err
@@ -892,6 +896,9 @@ func executeRunner(ctx context.Context, cfg runnerConfig) error {
 		}
 		unauthorized = false
 		if err := cfg.runJob(ctx, job); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if errors.Is(err, errCredentialsDeferred) {
 				pause(ctx, cfg.idle)
 				continue
@@ -1005,6 +1012,10 @@ func (cfg runnerConfig) runJob(ctx context.Context, job runnerJob) error {
 	}
 	fmt.Fprintf(os.Stderr, "runner: %s %s (operation %s)\n", job.Kind, job.Environment.Name, job.OperationID)
 	if err := cfg.ensureCredentials(ctx, job); err != nil {
+		if ctx.Err() != nil {
+			cfg.abandonLease(job.OperationID)
+			return ctx.Err()
+		}
 		var missing missingCredentialsError
 		if errors.Is(err, errCredentialsDeferred) || errors.As(err, &missing) {
 			return err
@@ -1039,7 +1050,23 @@ func (cfg runnerConfig) runJob(ctx context.Context, job runnerJob) error {
 	default:
 		err = errors.New("unknown job kind")
 	}
+	if ctx.Err() != nil {
+		cfg.abandonLease(job.OperationID)
+		return ctx.Err()
+	}
 	return cfg.finishJob(ctx, job, err)
+}
+
+// abandonLease returns a job to the queue when the runner process stops.
+// The report uses the caller's context, which is already cancelled, so the
+// control plane would otherwise keep the lease until it expires.
+func (cfg runnerConfig) abandonLease(operationID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	status, err := cfg.post(ctx, cfg.jobsRootPath()+"/"+url.PathEscape(operationID)+"/release", map[string]any{})
+	if err != nil || (status != http.StatusNoContent && status != http.StatusConflict) {
+		fmt.Fprintln(os.Stderr, "runner: the approval stays leased until it expires")
+	}
 }
 
 func (cfg runnerConfig) finishJob(ctx context.Context, job runnerJob, err error) error {

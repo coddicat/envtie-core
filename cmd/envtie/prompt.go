@@ -2,13 +2,90 @@ package main
 
 import (
 	"bufio"
+	"crypto/ed25519"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/coddicat/envtie-core/sdk/adapter"
 	"golang.org/x/term"
 )
+
+// promptRunnerConnection asks for the control plane URL, public key, and runner
+// token when they are missing. Provider credentials are requested later, once
+// an approved plan lists them. Existing valid values are left unchanged.
+func promptRunnerConnection() error {
+	if !runnerCanPrompt() {
+		return nil
+	}
+	type field struct {
+		name, description string
+		secret            bool
+		normalize         func(string) string
+		valid             func(string) bool
+	}
+	fields := []field{
+		{name: "ENVTIE_API_URL", description: "control plane URL", normalize: func(v string) string { return strings.TrimRight(strings.TrimSpace(v), "/") }, valid: secureAPIURL},
+		{name: "ENVTIE_PUBLIC_KEY", description: "base64 Ed25519 public key", normalize: strings.TrimSpace, valid: validPublicKey},
+		{name: "ENVTIE_RUNNER_TOKEN", description: "runner token", secret: true, normalize: strings.TrimSpace, valid: acceptableCredential},
+	}
+	reader := bufio.NewReader(os.Stdin)
+	announced := false
+	for _, field := range fields {
+		current := field.normalize(os.Getenv(field.name))
+		if field.valid(current) {
+			continue
+		}
+		if !announced {
+			fmt.Fprintln(os.Stderr, "runner: enter the control plane connection. The token stays in this process.")
+			announced = true
+		}
+		for {
+			fmt.Fprintf(os.Stderr, "%s (%s): ", field.name, field.description)
+			value, err := readPromptLine(reader, field.secret)
+			if err != nil {
+				return err
+			}
+			value = field.normalize(value)
+			if !field.valid(value) {
+				fmt.Fprintln(os.Stderr, "runner: that value is not valid")
+				continue
+			}
+			if err := os.Setenv(field.name, value); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	return nil
+}
+
+func validPublicKey(value string) bool {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value))
+	return err == nil && len(raw) == ed25519.PublicKeySize
+}
+
+func readPromptLine(reader *bufio.Reader, secret bool) (string, error) {
+	if secret {
+		raw, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return "", err
+		}
+		value := string(raw)
+		for i := range raw {
+			raw[i] = 0
+		}
+		return value, nil
+	}
+	value, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return strings.TrimRight(value, "\r\n"), nil
+}
 
 func runnerCanPrompt() bool {
 	if os.Getenv("ENVTIE_RUNNER_PROMPT") == "0" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") == "true" {
