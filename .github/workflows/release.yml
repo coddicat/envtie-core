@@ -78,7 +78,10 @@ jobs:
             type=semver,pattern={{version}},value=${{ env.TAG }}
             type=semver,pattern={{major}}.{{minor}},value=${{ env.TAG }}
             type=raw,value=latest,enable=${{ !contains(env.TAG, '-') }}
-      - uses: docker/build-push-action@v6
+      # GHCR denies read_package when the first push includes provenance or SBOM
+      # attestations. Publish the image, then attach them once the package is readable.
+      - id: image
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.runner
@@ -89,8 +92,38 @@ jobs:
           build-args: VERSION=${{ env.TAG }}
           cache-from: type=gha,scope=core-runner
           cache-to: type=gha,mode=max,scope=core-runner
-          provenance: mode=max
-          sbom: true
+          provenance: false
+          sbom: false
+      - name: Wait until GHCR allows reading the package
+        run: |
+          set -eu
+          image="ghcr.io/${{ github.repository_owner }}/envtie-runner@${{ steps.image.outputs.digest }}"
+          for attempt in $(seq 1 24); do
+            if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
+              exit 0
+            fi
+            echo "GHCR cannot read the package yet (attempt ${attempt})"
+            sleep 5
+          done
+          echo "::error::Grant coddicat/envtie-core Actions write access on the envtie-runner package, then rerun Release."
+          exit 1
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/envtie-runner
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - id: sbom
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/envtie-runner@${{ steps.image.outputs.digest }}
+          format: spdx-json
+          output-file: runner.spdx.json
+      - uses: actions/attest-sbom@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/envtie-runner
+          subject-digest: ${{ steps.image.outputs.digest }}
+          sbom-path: runner.spdx.json
+          push-to-registry: true
 
   npm:
     name: npm packages
@@ -109,7 +142,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
       - name: Use trusted-publishing npm client
-        run: npm install --global npm@latest
+        run: npm install --global npm@11
       - uses: actions/download-artifact@v4
         with:
           name: core-binaries
