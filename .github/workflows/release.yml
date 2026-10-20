@@ -41,7 +41,7 @@ jobs:
       - run: go test ./...
       - name: Cross-compile once
         run: sh scripts/release-binaries.sh "$TAG" dist
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: "dist/*"
       - uses: actions/upload-artifact@v4
@@ -107,7 +107,7 @@ jobs:
           done
           echo "::error::Grant coddicat/envtie-core Actions write access on the envtie-runner package, then rerun Release."
           exit 1
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/envtie-runner
           subject-digest: ${{ steps.image.outputs.digest }}
