@@ -118,7 +118,7 @@ jobs:
           image: ghcr.io/${{ github.repository_owner }}/envtie-runner@${{ steps.image.outputs.digest }}
           format: spdx-json
           output-file: runner.spdx.json
-      - uses: actions/attest-sbom@v2
+      - uses: actions/attest-sbom@v4
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/envtie-runner
           subject-digest: ${{ steps.image.outputs.digest }}
