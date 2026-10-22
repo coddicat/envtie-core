@@ -11,7 +11,7 @@ mkdir -p "$out"
 out=$(CDPATH= cd -- "$out" && pwd)
 for target in $targets; do
   os=${target%/*}; arch=${target#*/}; ext=""; [ "$os" = windows ] && ext=".exe"
-  for name in envtie adapter-neon adapter-upstash adapter-github adapter-stripe; do
+  for name in envtie adapter-neon adapter-upstash adapter-github adapter-stripe adapter-sentry; do
     CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -buildvcs=false \
       -ldflags="-s -w -X main.version=${tag}" \
       -o "$out/${name}_${tag}_${os}_${arch}${ext}" "./cmd/${name}"

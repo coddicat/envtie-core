@@ -2,7 +2,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 mkdir -p dist
-for name in envtie adapter-neon adapter-upstash adapter-github adapter-stripe; do
+for name in envtie adapter-neon adapter-upstash adapter-github adapter-stripe adapter-sentry; do
   go build -trimpath -buildvcs=false -ldflags '-buildid=' -o "dist/$name" "./cmd/$name"
   sha256sum "dist/$name"
 done

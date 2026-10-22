@@ -214,7 +214,7 @@ func (b Blueprint) Validate() error {
 		if !adapterName.MatchString(c.Adapter) {
 			return fmt.Errorf("adapter %q must be pinned to a major version", c.Adapter)
 		}
-		official := c.Adapter == "neon@1" || c.Adapter == "upstash@1" || c.Adapter == "stripe@1" || c.Adapter == "github@1"
+		official := c.Adapter == "neon@1" || c.Adapter == "upstash@1" || c.Adapter == "stripe@1" || c.Adapter == "github@1" || c.Adapter == "sentry@1"
 		if official && c.Source != nil {
 			return fmt.Errorf("%s: official adapters cannot override their source", c.ID)
 		}

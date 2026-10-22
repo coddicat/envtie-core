@@ -216,7 +216,7 @@ if [ "$source" != file ]; then
 fi
 
 ./scripts/build.sh
-for name in envtie adapter-neon adapter-upstash adapter-github adapter-stripe; do
+for name in envtie adapter-neon adapter-upstash adapter-github adapter-stripe adapter-sentry; do
   if [ ! -f "$root/dist/$name" ] || [ ! -s "$root/dist/$name" ]; then
     echo "Missing adapter artifact: dist/$name" >&2
     exit 1

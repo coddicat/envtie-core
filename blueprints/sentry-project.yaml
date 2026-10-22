@@ -1,0 +1,17 @@
+name: sentry-preview
+components:
+  - id: sentry
+    adapter: sentry@1
+    ownership: managed
+    config:
+      organization: your-org-slug
+      team: your-team-slug
+      platform: node-express
+bindings:
+  - from: sentry.SENTRY_DSN
+    to: dotenv.SENTRY_DSN
+  - from: sentry.SENTRY_PROJECT_SLUG
+    to: dotenv.SENTRY_PROJECT_SLUG
+policy:
+  expires_in: 1d
+  protect: false

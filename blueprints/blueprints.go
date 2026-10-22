@@ -18,6 +18,7 @@ func Names() []string {
 		"neon-upstash-ci.yaml",
 		"neon.yaml",
 		"stripe-webhook.yaml",
+		"sentry-project.yaml",
 		"referenced-neon.yaml",
 	}
 }
