@@ -56,7 +56,7 @@ jobs:
             fi
           }
           require ci.yml "CI"
-          require security.yml "Security"
+          # security.yml was removed; CI covers the green-main gate for tagging.
           smoke=$(gh run list --workflow docker-smoke.yml --branch main --limit 20 \
             --json status,conclusion,headSha --jq '[.[] | select(.status=="completed")][0] // empty')
           if [ -z "$smoke" ]; then
