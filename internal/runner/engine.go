@@ -453,6 +453,8 @@ func (e Engine) Destroy(ctx context.Context, b core.Blueprint, env *core.Environ
 		if _, err := e.retry(ctx, c, req); err != nil {
 			continue
 		}
+		// Always verify with read. Adapters that schedule async deletion (e.g. Sentry)
+		// must report pending/in-progress deletion as Absent on read so this check passes.
 		read, err := e.call(ctx, c, withHook(req, "read"))
 		if err != nil || !read.Absent {
 			continue

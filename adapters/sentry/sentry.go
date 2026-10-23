@@ -43,9 +43,10 @@ func (Handler) Manifest() adapter.Manifest {
 }
 
 type project struct {
-	ID   string `json:"id"`
-	Slug string `json:"slug"`
-	Name string `json:"name"`
+	ID     string `json:"id"`
+	Slug   string `json:"slug"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
 }
 
 type clientKey struct {
@@ -81,6 +82,9 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 		}
 		if err != nil {
 			return adapter.Response{}, classify(status, r.Hook, err)
+		}
+		if projectPendingDeletion(proj.Status) {
+			return adapter.Response{Absent: true}, nil
 		}
 		return adapter.Response{ExternalID: proj.Slug, Status: "ready"}, nil
 	case "apply":
@@ -129,12 +133,14 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 			"SENTRY_PROJECT_SLUG": proj.Slug,
 		}}, nil
 	case "destroy":
+		// Sentry DELETE returns 204 and schedules async removal. The runner always
+		// re-reads; projectPendingDeletion on read reports Absent while deletion finishes.
 		id := r.ExternalID
 		if id == "" {
 			id = slug
 		}
 		proj, status, err := getProject(ctx, auth, org, id)
-		if status == http.StatusNotFound {
+		if status == http.StatusNotFound || (err == nil && projectPendingDeletion(proj.Status)) {
 			return adapter.Response{Absent: true}, nil
 		}
 		if err != nil {
@@ -187,6 +193,15 @@ func preflight(r adapter.Request) error {
 		}
 	}
 	return nil
+}
+
+func projectPendingDeletion(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "pending_deletion", "deletion_in_progress":
+		return true
+	default:
+		return false
+	}
 }
 
 func projectSlug(name string) string {

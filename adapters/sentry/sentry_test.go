@@ -98,6 +98,62 @@ func TestDestroyRefusesUnmanagedProject(t *testing.T) {
 	}
 }
 
+func TestReadTreatsPendingDeletionAsAbsent(t *testing.T) {
+	t.Setenv("SENTRY_AUTH_TOKEN", "sntrys_fixture")
+	oldClient := httpclient.Client
+	oldBase := apiBase
+	t.Cleanup(func() {
+		httpclient.Client = oldClient
+		apiBase = oldBase
+	})
+	apiBase = "https://sentry.test/api/0"
+	httpclient.Client = &http.Client{Transport: roundTrip(func(r *http.Request) (int, string) {
+		return http.StatusOK, `{"id":"1","slug":"pr-22-sentry","name":"pr-22-sentry","status":"pending_deletion"}`
+	})}
+	resp, err := (Handler{}).Handle(context.Background(), adapter.Request{
+		Hook: "read", Environment: "pr-22", Component: "sentry",
+		Config: map[string]string{"organization": "solomonyk-llc", "team": "engineering", "name": "pr-22-sentry"}, ExternalID: "pr-22-sentry",
+	})
+	if err != nil || !resp.Absent {
+		t.Fatalf("pending deletion should be absent: %+v %v", resp, err)
+	}
+}
+
+func TestDestroyThenReadPendingDeletionClears(t *testing.T) {
+	t.Setenv("SENTRY_AUTH_TOKEN", "sntrys_fixture")
+	oldClient := httpclient.Client
+	oldBase := apiBase
+	t.Cleanup(func() {
+		httpclient.Client = oldClient
+		apiBase = oldBase
+	})
+	apiBase = "https://sentry.test/api/0"
+	phase := "active"
+	httpclient.Client = &http.Client{Transport: roundTrip(func(r *http.Request) (int, string) {
+		switch {
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/projects/solomonyk-llc/pr-22-sentry/"):
+			phase = "pending_deletion"
+			return http.StatusNoContent, ""
+		case r.Method == http.MethodGet:
+			return http.StatusOK, `{"id":"1","slug":"pr-22-sentry","name":"pr-22-sentry","status":"` + phase + `"}`
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			return http.StatusNotFound, `{}`
+		}
+	})}
+	req := adapter.Request{
+		Hook: "destroy", Environment: "pr-22", Component: "sentry",
+		Config: map[string]string{"organization": "solomonyk-llc", "team": "engineering", "name": "pr-22-sentry"}, ExternalID: "pr-22-sentry",
+	}
+	if resp, err := (Handler{}).Handle(context.Background(), req); err != nil || !resp.Absent {
+		t.Fatalf("204 destroy should be absent: %+v %v", resp, err)
+	}
+	req.Hook = "read"
+	if resp, err := (Handler{}).Handle(context.Background(), req); err != nil || !resp.Absent {
+		t.Fatalf("post-destroy pending_deletion read should be absent: %+v %v", resp, err)
+	}
+}
+
 func TestMissingTokenFailsBeforeProviderCall(t *testing.T) {
 	t.Setenv("SENTRY_AUTH_TOKEN", "")
 	calls := 0
