@@ -12,7 +12,7 @@ python3 - "dist" "$os" "$arch" <<'PY'
 import hashlib, json, os, sys
 out, goos, arch = sys.argv[1], sys.argv[2], sys.argv[3]
 catalog = {"release": "local", "adapters": {}}
-for name in ("neon", "upstash", "github", "stripe"):
+for name in ("neon", "upstash", "github", "stripe", "sentry"):
     path = os.path.join(out, f"adapter-{name}")
     digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
     adapter = f"{name}@1"

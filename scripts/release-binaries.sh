@@ -23,7 +23,7 @@ base_url=${ENVTIE_RELEASE_URL:-https://github.com/$repository/releases/download/
 python3 - "$out" "$tag" "$base_url" <<'PY'
 import hashlib, json, os, re, sys
 out, tag, base_url = sys.argv[1], sys.argv[2], sys.argv[3]
-pattern = re.compile(r"^adapter-(neon|upstash|github|stripe)_" + re.escape(tag) + r"_(linux|darwin|windows)_(amd64|arm64)(?:\.exe)?$")
+pattern = re.compile(r"^adapter-(neon|upstash|github|stripe|sentry)_" + re.escape(tag) + r"_(linux|darwin|windows)_(amd64|arm64)(?:\.exe)?$")
 catalog = {"release": tag, "base_url": base_url.rstrip("/"), "adapters": {}}
 for name in sorted(os.listdir(out)):
     match = pattern.match(name)
