@@ -205,6 +205,35 @@ func TestProtectedDestroyRequiresExactName(t *testing.T) {
 		t.Fatal("protected environment mutated")
 	}
 }
+func TestDestroyInjectsManagedName(t *testing.T) {
+	b := core.Blueprint{Name: "test", Components: []core.Component{{ID: "sentry", Adapter: "fake@1", Executable: "fake", SHA256: strings.Repeat("a", 64), Ownership: core.Managed, Config: map[string]string{"organization": "acme"}}}}
+	env := core.Environment{Name: "pr-24", Resources: map[string]core.Resource{"sentry": {ComponentID: "sentry", Adapter: "fake@1", Ownership: core.Managed, ExternalID: "pr-24-sentry"}}}
+	var destroyName, readName string
+	e := Engine{Call: func(_ context.Context, _ core.Component, r adapter.Request) (adapter.Response, error) {
+		if r.Hook == "manifest" {
+			return fakeManifest(), nil
+		}
+		if r.Hook == "destroy" {
+			destroyName = r.Config["name"]
+			if r.Config["organization"] != "acme" {
+				t.Fatalf("lost blueprint config: %#v", r.Config)
+			}
+			return adapter.Response{Absent: true}, nil
+		}
+		if r.Hook == "read" {
+			readName = r.Config["name"]
+			return adapter.Response{Absent: true}, nil
+		}
+		return adapter.Response{}, nil
+	}}
+	if err := e.Destroy(context.Background(), b, &env, ""); err != nil || env.State != "DESTROYED" {
+		t.Fatalf("err=%v state=%s", err, env.State)
+	}
+	if destroyName != "pr-24-sentry" || readName != "pr-24-sentry" {
+		t.Fatalf("destroy name=%q read name=%q", destroyName, readName)
+	}
+}
+
 func TestDestroyResidual(t *testing.T) {
 	b := core.Blueprint{Name: "test", Components: []core.Component{{ID: "db", Adapter: "fake@1", Executable: "fake", SHA256: strings.Repeat("a", 64), Ownership: core.Managed}}}
 	env := core.Environment{Name: "preview", Resources: map[string]core.Resource{"db": {ComponentID: "db", Adapter: "fake@1", Ownership: core.Managed, ExternalID: "res-1"}}}

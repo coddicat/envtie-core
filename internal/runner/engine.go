@@ -449,7 +449,9 @@ func (e Engine) Destroy(ctx context.Context, b core.Blueprint, env *core.Environ
 			}
 		}
 		appendLog(env, "info", c.ID+" destroy")
-		req := adapter.Request{Protocol: adapter.ProtocolVersion, Hook: "destroy", Environment: env.Name, Component: c.ID, Config: c.Config, ExternalID: r.ExternalID, IdempotencyKey: env.Name + "/destroy/" + c.ID}
+		cfg := copyConfig(c.Config)
+		cfg["name"] = managedConfigName(env.Name, c.ID)
+		req := adapter.Request{Protocol: adapter.ProtocolVersion, Hook: "destroy", Environment: env.Name, Component: c.ID, Config: cfg, ExternalID: r.ExternalID, IdempotencyKey: env.Name + "/destroy/" + c.ID}
 		if _, err := e.retry(ctx, c, req); err != nil {
 			continue
 		}
