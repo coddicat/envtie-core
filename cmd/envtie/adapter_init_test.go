@@ -16,23 +16,28 @@ func TestEnvPrefix(t *testing.T) {
 func TestSdkModuleVersion(t *testing.T) {
 	prev := version
 	t.Cleanup(func() { version = prev })
-	version = "v1.6.0-beta.1"
-	if got := sdkModuleQuery(); got != "v1.6.0-beta.1" {
+
+	// Synthetic tags only — pin behavior, not a real release string.
+	version = "v9.9.9-test"
+	if got := sdkModuleQuery(); got != "v9.9.9-test" {
 		t.Fatalf("got %q", got)
 	}
-	if got := sdkRequireVersion(false); got != "v1.6.0-beta.1" {
+	if got := sdkRequireVersion(false); got != "v9.9.9-test" {
 		t.Fatalf("require %q", got)
 	}
 	if got := sdkRequireVersion(true); got != "v0.0.0" {
 		t.Fatalf("local require %q", got)
 	}
-	version = "1.6.0-beta.1"
-	if got := sdkModuleQuery(); got != "v1.6.0-beta.1" {
+	version = "9.9.9-test"
+	if got := sdkModuleQuery(); got != "v9.9.9-test" {
 		t.Fatalf("missing v → %q", got)
 	}
 	version = "dev"
 	if got := sdkModuleQuery(); got != "latest" {
 		t.Fatalf("dev → %q", got)
+	}
+	if got := sdkRequireVersion(false); got != "v0.0.0" {
+		t.Fatalf("dev require %q", got)
 	}
 }
 
