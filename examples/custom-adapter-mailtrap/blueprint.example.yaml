@@ -1,0 +1,25 @@
+# Example only — replace sha256 and ids, then paste via dashboard Write YAML.
+name: mailtrap-preview
+components:
+  - id: mail
+    adapter: mailtrap@1
+    executable: ./dist/adapter-mailtrap
+    sha256: 0000000000000000000000000000000000000000000000000000000000000000
+    ownership: managed
+    config:
+      account_id: "REPLACE_ACCOUNT_ID"
+      project_id: "REPLACE_PROJECT_ID"
+bindings:
+  - from: mail.MAILTRAP_SMTP_HOST
+    to: dotenv.MAILTRAP_SMTP_HOST
+  - from: mail.MAILTRAP_SMTP_PORT
+    to: dotenv.MAILTRAP_SMTP_PORT
+  - from: mail.MAILTRAP_SMTP_USER
+    to: dotenv.MAILTRAP_SMTP_USER
+  - from: mail.MAILTRAP_SMTP_PASS
+    to: dotenv.MAILTRAP_SMTP_PASS
+  - from: mail.MAILTRAP_INBOX_ID
+    to: dotenv.MAILTRAP_INBOX_ID
+policy:
+  expires_in: 1d
+  protect: false

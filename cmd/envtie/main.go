@@ -43,7 +43,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: envtie preview apply|destroy|close <environment> [--run] | preview sweep [--run] | preview status <operation-id> | github setup | runner execute [--once] | blueprint validate [file] | plan | apply | status | outputs | destroy | version")
+		return errors.New("usage: envtie preview apply|destroy|close <environment> [--run] | preview sweep [--run] | preview status <operation-id> | github setup | runner execute [--once] | adapter init|test | blueprint validate [file] | plan | apply | status | outputs | destroy | version")
 	}
 	switch args[0] {
 	case "help", "-h", "--help":
@@ -56,7 +56,8 @@ Commands:
   preview apply|close|destroy    Run a custom-CI preview lifecycle
   preview sweep | status         Reclaim or inspect previews
   runner execute [--once]        Execute approved workspace jobs
-  adapter test <executable>      Validate a custom adapter
+  adapter init <name>            Scaffold a private Go adapter
+  adapter test <executable>      Validate a custom adapter and print its pin
   github setup                   Print a GitHub App manifest
   version                        Print the CLI version
 
@@ -100,10 +101,7 @@ Runner environment:
 	case "github":
 		return githubSetup(args[1:])
 	case "adapter":
-		if len(args) != 3 || args[1] != "test" {
-			return errors.New("usage: adapter test <executable>")
-		}
-		return testAdapter(args[2])
+		return adapterCommand(args[1:])
 	case "runner":
 		if len(args) < 2 || args[1] != "execute" {
 			return errors.New("usage: runner execute [--once]")

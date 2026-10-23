@@ -44,7 +44,8 @@ Canonical templates are in [`blueprints/`](blueprints/), and the JSON Schema is
 template and replace only its explicit placeholders.
 
 Custom providers can implement the protocol in [`sdk/adapter`](sdk/adapter).
-See [`examples/custom-adapter`](examples/custom-adapter).
+See [`examples/custom-adapter`](examples/custom-adapter) (file-backed fixture) and
+[`examples/custom-adapter-mailtrap`](examples/custom-adapter-mailtrap) (Mailtrap Email Sandbox inbox per environment).
 
 ## Development
 
