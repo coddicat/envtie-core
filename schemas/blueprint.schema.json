@@ -13,7 +13,8 @@
   },
   "$defs": {
     "component": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "additionalProperties": false,
       "required": ["id", "adapter", "ownership"],
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$" },
@@ -35,24 +36,28 @@
         "depends_on": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "config": { "type": "object", "additionalProperties": { "type": "string" } }
       },
-      "allOf": [{
-        "if": { "properties": { "adapter": { "enum": ["neon@1", "upstash@1", "github@1", "stripe@1"] } } },
-        "then": true,
-        "else": {
-          "oneOf": [
-            { "required": ["executable", "sha256"] },
-            { "required": ["source"] }
-          ]
+      "allOf": [
+        {
+          "if": { "properties": { "adapter": { "enum": ["neon@1", "upstash@1", "github@1", "stripe@1"] } } },
+          "then": true,
+          "else": {
+            "oneOf": [{ "required": ["executable", "sha256"] }, { "required": ["source"] }]
+          }
         }
-      }]
+      ]
     },
     "binding": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "additionalProperties": false,
       "required": ["from", "to"],
-      "properties": { "from": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*\\.[A-Za-z_][A-Za-z0-9_]*$" }, "to": { "type": "string" } }
+      "properties": {
+        "from": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*\\.[A-Za-z_][A-Za-z0-9_]*$" },
+        "to": { "type": "string" }
+      }
     },
     "policy": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "additionalProperties": false,
       "properties": { "expires_in": { "type": "string" }, "protect": { "type": "boolean" } }
     }
   }

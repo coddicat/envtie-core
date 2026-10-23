@@ -1,0 +1,12 @@
+{
+  "name": "envtie-core",
+  "private": true,
+  "scripts": {
+    "prettier": "prettier --write \"packages/**/*.{js,mjs,cjs,json}\" \"scripts/**/*.{js,mjs,cjs}\" \"schemas/**/*.json\" \"package.json\" \".prettierrc.json\"",
+    "prettier:fix": "npm run prettier",
+    "prettier:check": "prettier --check \"packages/**/*.{js,mjs,cjs,json}\" \"scripts/**/*.{js,mjs,cjs}\" \"schemas/**/*.json\" \"package.json\" \".prettierrc.json\""
+  },
+  "devDependencies": {
+    "prettier": "3.9.9"
+  }
+}

@@ -22,7 +22,9 @@ if (!packageName) {
 
 let binary;
 try {
-  binary = process.env.ENVTIE_BINARY_PATH || require.resolve(`${packageName}/envtie${process.platform === "win32" ? ".exe" : ""}`);
+  binary =
+    process.env.ENVTIE_BINARY_PATH ||
+    require.resolve(`${packageName}/envtie${process.platform === "win32" ? ".exe" : ""}`);
 } catch {
   console.error(
     `envtie: ${packageName} is missing. Reinstall without --omit=optional, or use the EnvTie.dev container image.`,
