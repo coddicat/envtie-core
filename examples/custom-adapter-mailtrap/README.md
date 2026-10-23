@@ -2,7 +2,7 @@
 
 Mailtrap is **not** an official EnvTie catalog adapter. This folder is a sample private adapter you can build, pin, and run through the product **Custom adapter** path—the same path any user-built adapter uses.
 
-To scaffold your own adapter from scratch (not Mailtrap), run `envtie adapter init <name>` instead.
+To scaffold your own adapter from scratch (not Mailtrap), run `envtie adapter init <name>` — the CLI builds and prints the SHA-256 pin when Go is installed.
 
 Each environment gets one Mailtrap [Email Sandbox](https://mailtrap.io) testing inbox. SMTP credentials are bound for the app; the API token stays on the runner.
 

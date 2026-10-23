@@ -1,18 +1,23 @@
 # Minimal custom adapter
 
-Private adapters are ordinary binaries. Prefer scaffolding a new one:
+Prefer the CLI (no manual `go get` / `go build`):
 
 ```powershell
-envtie adapter init myprovider
+npx --yes "@envtie.dev/cli@<version>" adapter init myprovider
 cd adapter-myprovider
-go mod tidy
-go build -trimpath -o dist/adapter-myprovider.exe .
-envtie adapter test ./dist/adapter-myprovider.exe
+# init already built dist/ and printed sha256:
+# pin adapter myprovider@1 in the dashboard Custom adapter step
 ```
 
-Then choose **Custom adapter** in the EnvTie.dev Blueprint wizard and pin the executable + SHA-256.
+After editing code:
 
-This folder is a hand-written file-backed sample (adapter name `example`). Prefer `envtie adapter init` for new adapters. Official catalog adapters stay in the wizard by name; everything else uses the Custom adapter step.
+```powershell
+npx --yes "@envtie.dev/cli@<version>" adapter build
+```
+
+Requires [Go](https://go.dev/dl/). Pass `-no-build` on init if you only want the files.
+
+This folder is a hand-written file-backed sample (adapter name `example`). Official catalog adapters stay in the wizard by name; everything else uses the Custom adapter step.
 
 ## Runner credentials (this example)
 

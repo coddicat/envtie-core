@@ -13,15 +13,38 @@ func TestEnvPrefix(t *testing.T) {
 	}
 }
 
+func TestSdkModuleVersion(t *testing.T) {
+	prev := version
+	t.Cleanup(func() { version = prev })
+	version = "v1.6.0-beta.1"
+	if got := sdkModuleQuery(); got != "v1.6.0-beta.1" {
+		t.Fatalf("got %q", got)
+	}
+	if got := sdkRequireVersion(false); got != "v1.6.0-beta.1" {
+		t.Fatalf("require %q", got)
+	}
+	if got := sdkRequireVersion(true); got != "v0.0.0" {
+		t.Fatalf("local require %q", got)
+	}
+	version = "1.6.0-beta.1"
+	if got := sdkModuleQuery(); got != "v1.6.0-beta.1" {
+		t.Fatalf("missing v → %q", got)
+	}
+	version = "dev"
+	if got := sdkModuleQuery(); got != "latest" {
+		t.Fatalf("dev → %q", got)
+	}
+}
+
 func TestInitAdapterWritesScaffold(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "adapter-demo")
-	if err := initAdapter([]string{"demo", "-dir", dir, "-module", "example.com/adapter-demo"}); err != nil {
+	if err := initAdapter([]string{"demo", "-dir", dir, "-module", "example.com/adapter-demo", "-no-build"}); err != nil {
 		t.Fatal(err)
 	}
 	// Flags-before-name form also works.
 	dir2 := filepath.Join(root, "adapter-demo2")
-	if err := initAdapter([]string{"-dir", dir2, "-module", "example.com/adapter-demo2", "demo"}); err != nil {
+	if err := initAdapter([]string{"-dir", dir2, "-module", "example.com/adapter-demo2", "-no-build", "demo"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir2, "main.go")); err != nil {
@@ -53,24 +76,73 @@ func TestInitAdapterWritesScaffold(t *testing.T) {
 			if !strings.Contains(text, "adapter: demo@1") || !strings.Contains(text, "DEMO_VALUE") {
 				t.Fatalf("blueprint: %s", text)
 			}
+		case "README.md":
+			if !strings.Contains(text, "envtie adapter build") {
+				t.Fatalf("README missing build command: %s", text)
+			}
 		}
 	}
-	if err := initAdapter([]string{"demo", "-dir", dir}); err == nil {
+	if err := initAdapter([]string{"demo", "-dir", dir, "-no-build"}); err == nil {
 		t.Fatal("expected refuse without -force")
 	}
-	if err := initAdapter([]string{"demo", "-dir", dir, "-force"}); err != nil {
+	if err := initAdapter([]string{"demo", "-dir", dir, "-force", "-no-build"}); err != nil {
 		t.Fatal(err)
 	}
 }
 
+func TestDetectAdapterBinaryName(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "adapter-demo")
+	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/adapter-demo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	name, err := detectAdapterBinaryName(dir)
+	if err != nil || name != "adapter-demo" {
+		t.Fatalf("from module: %q %v", name, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dist", "adapter-demo.exe"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	name, err = detectAdapterBinaryName(dir)
+	if err != nil || name != "adapter-demo" {
+		t.Fatalf("from dist: %q %v", name, err)
+	}
+}
+
+func TestGoModHasLocalReplace(t *testing.T) {
+	root := t.TempDir()
+	mod := "module example.com/adapter-demo\n\nrequire github.com/coddicat/envtie-core v0.0.0\n\nreplace github.com/coddicat/envtie-core => ../..\n"
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(mod), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if !goModHasLocalReplace(root) {
+		t.Fatal("expected replace")
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if goModHasLocalReplace(root) {
+		t.Fatal("expected no replace")
+	}
+}
+
+func TestBuildAdapterCommandFlagOrder(t *testing.T) {
+	if err := buildAdapterCommand([]string{"missing-dir", "-no-test"}); err == nil {
+		t.Fatal("expected missing scaffold error")
+	}
+}
+
 func TestInitAdapterRejectsBadName(t *testing.T) {
-	if err := initAdapter([]string{"Demo"}); err == nil {
+	if err := initAdapter([]string{"Demo", "-no-build"}); err == nil {
 		t.Fatal("expected invalid name")
 	}
-	if err := initAdapter([]string{"neon"}); err == nil {
+	if err := initAdapter([]string{"neon", "-no-build"}); err == nil {
 		t.Fatal("expected reserved official name")
 	}
-	if err := initAdapter([]string{"demo", "-module", "bad module"}); err == nil {
+	if err := initAdapter([]string{"demo", "-module", "bad module", "-no-build"}); err == nil {
 		t.Fatal("expected invalid module")
 	}
 	if err := adapterCommand(nil); err == nil {
@@ -78,6 +150,9 @@ func TestInitAdapterRejectsBadName(t *testing.T) {
 	}
 	if err := adapterCommand([]string{"test"}); err == nil {
 		t.Fatal("expected test usage")
+	}
+	if err := adapterCommand([]string{"build", "a", "b"}); err == nil {
+		t.Fatal("expected build usage")
 	}
 }
 

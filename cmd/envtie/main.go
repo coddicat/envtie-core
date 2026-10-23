@@ -56,7 +56,8 @@ Commands:
   preview apply|close|destroy    Run a custom-CI preview lifecycle
   preview sweep | status         Reclaim or inspect previews
   runner execute [--once]        Execute approved workspace jobs
-  adapter init <name>            Scaffold a private Go adapter
+  adapter init <name>            Scaffold, build, and pin a private Go adapter
+  adapter build [dir]            Rebuild a scaffolded adapter
   adapter test <executable>      Validate a custom adapter and print its pin
   github setup                   Print a GitHub App manifest
   version                        Print the CLI version

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -34,11 +35,12 @@ type adapterScaffold struct {
 	AdapterID  string
 	Component  string
 	Replace    string
+	SDKVersion string
 }
 
 func adapterCommand(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: adapter init <name> | adapter test <executable>")
+		return errors.New("usage: adapter init <name> | adapter build [dir] | adapter test <executable>")
 	}
 	switch args[0] {
 	case "test":
@@ -48,27 +50,31 @@ func adapterCommand(args []string) error {
 		return testAdapter(args[1])
 	case "init":
 		return initAdapter(args[1:])
+	case "build":
+		return buildAdapterCommand(args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(`Custom adapters
 
-  adapter init <name> [flags]   Scaffold a private Go adapter
+  adapter init <name> [flags]   Scaffold, fetch the SDK, build, and print the SHA-256 pin
+  adapter build [dir] [flags]   Rebuild an existing scaffold (default dir: .)
   adapter test <executable>     Validate a binary and print its SHA-256 pin
 
 Init flags:
   -dir string       Output directory (default ./adapter-<name>)
   -module string    Go module path (default example.com/adapter-<name>)
   -force            Overwrite files that already exist
+  -no-build         Only write files (skip go get / tidy / build / test)
+  -no-test          Build but skip adapter test
 
-After init:
-  cd <dir>
-  go mod tidy
-  go build -trimpath -o dist/adapter-<name> .
-  envtie adapter test ./dist/adapter-<name>
-  Pin executable + sha256 via the dashboard Custom adapter step.
+Build flags:
+  -no-test          Rebuild without running adapter test
+
+Requires the Go toolchain (https://go.dev/dl/). Then pin executable + sha256
+in the dashboard Custom adapter step and put provider tokens on the runner.
 `)
 		return nil
 	default:
-		return errors.New("usage: adapter init <name> | adapter test <executable>")
+		return errors.New("usage: adapter init <name> | adapter build [dir] | adapter test <executable>")
 	}
 }
 
@@ -78,6 +84,8 @@ func initAdapter(args []string) error {
 	dirFlag := f.String("dir", "", "output directory")
 	moduleFlag := f.String("module", "", "Go module path")
 	force := f.Bool("force", false, "overwrite existing files")
+	noBuild := f.Bool("no-build", false, "skip go get, tidy, build, and test")
+	noTest := f.Bool("no-test", false, "build but skip adapter test")
 	name := ""
 	flagArgs := args
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -90,11 +98,11 @@ func initAdapter(args []string) error {
 	rest := f.Args()
 	switch {
 	case name != "" && len(rest) > 0:
-		return errors.New("usage: adapter init <name> [-dir path] [-module path] [-force]")
+		return errors.New("usage: adapter init <name> [-dir path] [-module path] [-force] [-no-build] [-no-test]")
 	case name == "" && len(rest) == 1:
 		name = strings.TrimSpace(rest[0])
 	case name == "":
-		return errors.New("usage: adapter init <name> [-dir path] [-module path] [-force]")
+		return errors.New("usage: adapter init <name> [-dir path] [-module path] [-force] [-no-build] [-no-test]")
 	}
 	if !adapterNamePattern.MatchString(name) {
 		return errors.New("adapter name: use a lowercase letter, then letters, numbers, or hyphens (max 41 chars)")
@@ -114,6 +122,7 @@ func initAdapter(args []string) error {
 		return errors.New("module: use a Go module path such as example.com/adapter-myprovider")
 	}
 	prefix := envPrefix(name)
+	replace := findLocalEnvtieCore(dir)
 	sc := adapterScaffold{
 		Name:       name,
 		Module:     module,
@@ -125,26 +134,214 @@ func initAdapter(args []string) error {
 		Binary:     "adapter-" + name,
 		AdapterID:  name + "@1",
 		Component:  name,
-		Replace:    findLocalEnvtieCore(dir),
+		Replace:    replace,
+		SDKVersion: sdkRequireVersion(replace != ""),
 	}
 	if err := writeAdapterScaffold(sc, *force); err != nil {
 		return err
 	}
-	bin := sc.Binary
-	if runtime.GOOS == "windows" {
-		bin += ".exe"
-	}
 	fmt.Printf("created %s\n", sc.Dir)
+	if *noBuild {
+		printAdapterManualNextSteps(sc)
+		return nil
+	}
+	binPath, err := buildAdapter(sc.Dir, sc.Binary, replace != "")
+	if err != nil {
+		return fmt.Errorf("%w\nfiles were written to %s; fix the issue then run: envtie adapter build", err, sc.Dir)
+	}
+	fmt.Printf("built %s\n", binPath)
+	if !*noTest {
+		if err := testAdapter(binPath); err != nil {
+			return fmt.Errorf("%w\nbinary is at %s; re-run: envtie adapter test %s", err, binPath, binPath)
+		}
+	}
+	fmt.Printf("next: pin adapter %s (executable %s) in the dashboard Custom adapter step\n", sc.AdapterID, adapterExecHint(sc.Binary))
+	fmt.Printf("runner env: %s and %s\n", sc.StateEnv, sc.SecretEnv)
+	return nil
+}
+
+func buildAdapterCommand(args []string) error {
+	f := flag.NewFlagSet("adapter build", flag.ContinueOnError)
+	f.SetOutput(os.Stderr)
+	noTest := f.Bool("no-test", false, "rebuild without running adapter test")
+	dir := "."
+	flagArgs := args
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		dir = args[0]
+		flagArgs = args[1:]
+	}
+	if err := f.Parse(flagArgs); err != nil {
+		return err
+	}
+	if len(f.Args()) > 0 {
+		return errors.New("usage: adapter build [dir] [-no-test]")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "main.go")); err != nil {
+		return fmt.Errorf("adapter build: %s is not an adapter scaffold (missing main.go)", dir)
+	}
+	binary, err := detectAdapterBinaryName(dir)
+	if err != nil {
+		return err
+	}
+	binPath, err := buildAdapter(dir, binary, goModHasLocalReplace(dir))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("built %s\n", binPath)
+	if !*noTest {
+		return testAdapter(binPath)
+	}
+	return nil
+}
+
+func goModHasLocalReplace(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "\r"))
+		if strings.HasPrefix(line, "replace ") && strings.Contains(line, "github.com/coddicat/envtie-core") {
+			return true
+		}
+	}
+	return false
+}
+
+func detectAdapterBinaryName(dir string) (string, error) {
+	if entries, err := os.ReadDir(filepath.Join(dir, "dist")); err == nil {
+		var candidates []string
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.IsDir() || !strings.HasPrefix(name, "adapter-") {
+				continue
+			}
+			candidates = append(candidates, strings.TrimSuffix(name, ".exe"))
+		}
+		sort.Strings(candidates)
+		if len(candidates) == 1 {
+			return candidates[0], nil
+		}
+		if len(candidates) > 1 {
+			// Prefer the directory/module name when several artifacts exist.
+			base := filepath.Base(dir)
+			for _, name := range candidates {
+				if name == base {
+					return name, nil
+				}
+			}
+			return candidates[0], nil
+		}
+	}
+	base := filepath.Base(filepath.Clean(dir))
+	if strings.HasPrefix(base, "adapter-") {
+		return base, nil
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return "", fmt.Errorf("adapter build: could not detect binary name in %s (expected dist/adapter-* or adapter-* directory)", dir)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) >= 2 && fields[0] == "module" {
+			mod := fields[1]
+			if i := strings.LastIndex(mod, "/"); i >= 0 {
+				mod = mod[i+1:]
+			}
+			if strings.HasPrefix(mod, "adapter-") {
+				return mod, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("adapter build: could not detect binary name in %s", dir)
+}
+
+func printAdapterManualNextSteps(sc adapterScaffold) {
+	bin := adapterBinaryFile(sc.Binary)
 	fmt.Printf("next:\n")
 	fmt.Printf("  cd %s\n", sc.Dir)
-	if sc.Replace == "" {
-		fmt.Printf("  go get github.com/coddicat/envtie-core@latest\n")
-	}
-	fmt.Printf("  go mod tidy\n")
-	fmt.Printf("  go build -trimpath -o dist/%s .\n", bin)
-	fmt.Printf("  envtie adapter test ./dist/%s\n", bin)
+	fmt.Printf("  envtie adapter build\n")
+	fmt.Printf("  # or: go get github.com/coddicat/envtie-core@%s && go mod tidy && go build -trimpath -o dist/%s .\n", sdkModuleQuery(), bin)
 	fmt.Printf("then pin adapter %s in the dashboard Custom adapter step\n", sc.AdapterID)
-	return nil
+}
+
+func adapterExecHint(binary string) string {
+	return "./dist/" + strings.TrimSuffix(binary, ".exe")
+}
+
+func adapterBinaryFile(binary string) string {
+	name := strings.TrimSuffix(binary, ".exe")
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
+}
+
+// sdkModuleQuery is the go get @query matching this CLI release (v-prefixed or latest).
+func sdkModuleQuery() string {
+	v := strings.TrimSpace(version)
+	if v == "" || v == "dev" {
+		return "latest"
+	}
+	if !strings.HasPrefix(v, "v") {
+		return "v" + v
+	}
+	return v
+}
+
+func sdkRequireVersion(localReplace bool) string {
+	if localReplace {
+		return "v0.0.0"
+	}
+	q := sdkModuleQuery()
+	if q == "latest" {
+		return "v0.0.0"
+	}
+	return q
+}
+
+func buildAdapter(dir, binary string, localReplace bool) (string, error) {
+	if _, err := exec.LookPath("go"); err != nil {
+		return "", errors.New("go toolchain required: install Go from https://go.dev/dl/ then re-run (or pass -no-build)")
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0755); err != nil {
+		return "", err
+	}
+	outName := adapterBinaryFile(binary)
+	outPath := filepath.Join("dist", outName)
+	run := func(args ...string) error {
+		cmd := exec.Command("go", args...)
+		cmd.Dir = dir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Env = append(os.Environ(), "GOTOOLCHAIN=auto")
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("go %s: %w", strings.Join(args, " "), err)
+		}
+		return nil
+	}
+	if !localReplace {
+		mod := "github.com/coddicat/envtie-core@" + sdkModuleQuery()
+		fmt.Printf("fetching %s\n", mod)
+		if err := run("get", mod); err != nil {
+			return "", err
+		}
+	}
+	if err := run("mod", "tidy"); err != nil {
+		return "", err
+	}
+	fmt.Printf("compiling %s\n", outPath)
+	if err := run("build", "-trimpath", "-o", outPath, "."); err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(filepath.Join(dir, outPath))
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return "", err
+	}
+	return abs, nil
 }
 
 func envPrefix(name string) string {
@@ -246,7 +443,7 @@ const adapterGoModTemplate = `module {{.Module}}
 
 go 1.22
 
-require github.com/coddicat/envtie-core v0.0.0
+require github.com/coddicat/envtie-core {{.SDKVersion}}
 {{if .Replace}}
 replace github.com/coddicat/envtie-core => {{.Replace}}
 {{end}}`
@@ -256,7 +453,7 @@ const adapterGitignoreTemplate = `dist/
 `
 
 const adapterMainTemplate = `// Private EnvTie.dev adapter scaffolded by "envtie adapter init".
-// Build, pin with "envtie adapter test", then use the dashboard Custom adapter step.
+// Rebuild with "envtie adapter build", then pin executable + sha256 in the dashboard Custom adapter step.
 package main
 
 import (
@@ -386,13 +583,13 @@ Replace the hooks with your provider's API when you are ready.
 
 ## Build and pin
 
+` + "`" + `envtie adapter init` + "`" + ` already runs ` + "`" + `go get` + "`" + `, ` + "`" + `go mod tidy` + "`" + `, ` + "`" + `go build` + "`" + `, and ` + "`" + `adapter test` + "`" + ` when the Go toolchain is installed. After you edit the code:
+
 ` + "```" + `powershell
-go mod tidy
-go build -trimpath -o dist/{{.Binary}}.exe .
-envtie adapter test ./dist/{{.Binary}}.exe
+envtie adapter build
 ` + "```" + `
 
-On macOS/Linux omit ` + "`" + `.exe` + "`" + `. Copy the printed ` + "`" + `sha256:` + "`" + ` into the dashboard.
+Copy the printed ` + "`" + `sha256:` + "`" + ` into the dashboard Custom adapter step.
 
 ## Runner credentials
 
@@ -410,7 +607,7 @@ Choose **Custom adapter** in the Blueprint wizard:
 | Component id | ` + "`" + `{{.Component}}` + "`" + ` |
 | Adapter id | ` + "`" + `{{.AdapterID}}` + "`" + ` |
 | Executable path | ` + "`" + `./dist/{{.Binary}}` + "`" + ` |
-| SHA-256 pin | from ` + "`" + `envtie adapter test` + "`" + ` |
+| SHA-256 pin | from ` + "`" + `adapter init` + "`" + ` / ` + "`" + `adapter build` + "`" + ` / ` + "`" + `adapter test` + "`" + ` |
 | Outputs to bind | ` + "`" + `{{.OutputName}}` + "`" + ` |
 
 See also ` + "`" + `blueprint.example.yaml` + "`" + `.
