@@ -20,12 +20,12 @@ import (
 )
 
 var (
-	apiBase       = "https://api.vercel.com"
-	pollInterval  = 3 * time.Second
-	pollTimeout   = 10 * time.Minute
-	projectIDPat  = regexp.MustCompile(`^[A-Za-z0-9._-]{1,256}$`)
-	gitBranchPat  = regexp.MustCompile(`^[A-Za-z0-9._/\-]{1,250}$`)
-	envKeyPat     = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,99}$`)
+	apiBase      = "https://api.vercel.com"
+	pollInterval = 3 * time.Second
+	pollTimeout  = 10 * time.Minute
+	projectIDPat = regexp.MustCompile(`^[A-Za-z0-9._-]{1,256}$`)
+	gitBranchPat = regexp.MustCompile(`^[A-Za-z0-9._/\-]{1,250}$`)
+	envKeyPat    = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,99}$`)
 )
 
 // Handler implements the EnvTie adapter protocol for Vercel preview hosting.
@@ -46,14 +46,14 @@ type project struct {
 }
 
 type deployment struct {
-	ID          string `json:"id"`
-	URL         string `json:"url"`
-	Name        string `json:"name"`
-	ReadyState  string `json:"readyState"`
-	ReadySubstate string `json:"readySubstate"`
-	Target      string `json:"target"`
-	Meta        map[string]string `json:"meta"`
-	CreatedAt   int64  `json:"createdAt"`
+	ID            string            `json:"id"`
+	URL           string            `json:"url"`
+	Name          string            `json:"name"`
+	ReadyState    string            `json:"readyState"`
+	ReadySubstate string            `json:"readySubstate"`
+	Target        string            `json:"target"`
+	Meta          map[string]string `json:"meta"`
+	CreatedAt     int64             `json:"createdAt"`
 }
 
 type envVar struct {
