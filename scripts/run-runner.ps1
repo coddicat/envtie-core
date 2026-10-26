@@ -243,7 +243,7 @@ if ($null -ne $runnerToken) {
 if ($source -ne 'file') { Save-RunnerTokenIfNeeded $runnerToken }
 
 & (Join-Path $PSScriptRoot 'build.ps1')
-foreach ($name in @('envtie.exe', 'adapter-neon.exe', 'adapter-upstash.exe', 'adapter-github.exe', 'adapter-stripe.exe', 'adapter-sentry.exe')) {
+foreach ($name in @('envtie.exe', 'adapter-neon.exe', 'adapter-upstash.exe', 'adapter-github.exe', 'adapter-stripe.exe', 'adapter-sentry.exe', 'adapter-mailtrap.exe', 'adapter-vercel.exe')) {
     $artifact = Join-Path $root "dist/$name"
     if (-not (Test-Path -LiteralPath $artifact -PathType Leaf) -or (Get-Item -LiteralPath $artifact).Length -le 0) {
         throw "Missing adapter artifact: dist/$name"

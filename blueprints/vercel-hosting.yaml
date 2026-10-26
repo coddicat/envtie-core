@@ -1,0 +1,24 @@
+name: vercel-preview
+components:
+  - id: postgres
+    adapter: neon@1
+    ownership: managed
+    config:
+      project_id: REPLACE_WITH_NEON_PROJECT_ID
+      database_name: REPLACE_WITH_NEON_DATABASE
+      role_name: REPLACE_WITH_NEON_ROLE
+  - id: host
+    adapter: vercel@1
+    ownership: managed
+    depends_on: [postgres]
+    config:
+      project_id: REPLACE_WITH_VERCEL_PROJECT_ID
+      # Optional: team_id, git_branch (defaults to the EnvTie environment name or GITHUB_HEAD_REF)
+bindings:
+  - from: postgres.DATABASE_URL
+    to: vercel.env.DATABASE_URL
+  - from: host.VERCEL_URL
+    to: dotenv.VERCEL_URL
+policy:
+  expires_in: 1d
+  protect: false

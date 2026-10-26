@@ -43,9 +43,10 @@ Canonical templates are in [`blueprints/`](blueprints/), and the JSON Schema is
 [`schemas/blueprint.schema.json`](schemas/blueprint.schema.json). Start with a
 template and replace only its explicit placeholders.
 
-Custom providers can implement the protocol in [`sdk/adapter`](sdk/adapter).
-See [`examples/custom-adapter`](examples/custom-adapter) (file-backed fixture) and
-[`examples/custom-adapter-mailtrap`](examples/custom-adapter-mailtrap) (Mailtrap Email Sandbox inbox per environment).
+Official adapters include Neon, Upstash, Stripe, GitHub, Sentry, Mailtrap, and
+Vercel (`vercel@1` — branch preview deploy + env vars on an existing project).
+Custom providers can implement the protocol in [`sdk/adapter`](sdk/adapter); see
+[`examples/custom-adapter`](examples/custom-adapter) and `envtie adapter init`.
 
 ## Development
 

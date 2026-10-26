@@ -81,6 +81,40 @@ func TestGitHubBindingsRequireTheGitHubProvider(t *testing.T) {
 	}
 }
 
+func TestVercelEnvBindingsRequireTheVercelProvider(t *testing.T) {
+	b := Blueprint{Name: "preview", Components: []Component{
+		{ID: "db", Adapter: "neon@1", Ownership: Managed, Config: map[string]string{"project_id": "p", "database_name": "d", "role_name": "r"}},
+	}, Bindings: []Binding{{From: "db.DATABASE_URL", To: "vercel.env.DATABASE_URL"}}}
+	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "vercel@1") {
+		t.Fatal(err)
+	}
+	b.Components = append(b.Components, Component{
+		ID: "host", Adapter: "vercel@1", Ownership: Managed, DependsOn: []string{"db"},
+		Config: map[string]string{"project_id": "prj_app"},
+	})
+	b.Bindings = append(b.Bindings, Binding{From: "host.VERCEL_URL", To: "dotenv.VERCEL_URL"})
+	if err := b.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVercelEnvBindingsRequireDependsOn(t *testing.T) {
+	b := Blueprint{Name: "preview", Components: []Component{
+		{ID: "db", Adapter: "neon@1", Ownership: Managed, Config: map[string]string{"project_id": "p", "database_name": "d", "role_name": "r"}},
+		{ID: "host", Adapter: "vercel@1", Ownership: Managed, Config: map[string]string{"project_id": "prj_app"}},
+	}, Bindings: []Binding{
+		{From: "db.DATABASE_URL", To: "vercel.env.DATABASE_URL"},
+		{From: "host.VERCEL_URL", To: "dotenv.VERCEL_URL"},
+	}}
+	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "depend on") {
+		t.Fatal(err)
+	}
+	b.Components[1].DependsOn = []string{"db"}
+	if err := b.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCustomAdapterRequiresExplicitSource(t *testing.T) {
 	component := Component{ID: "private", Adapter: "example@1", Ownership: Managed}
 	b := Blueprint{Name: "custom", Components: []Component{component}}

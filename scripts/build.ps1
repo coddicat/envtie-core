@@ -7,7 +7,7 @@ $goExe = (Get-Command go -ErrorAction SilentlyContinue).Source
 if (-not $goExe) { $goExe = Join-Path $repoRoot '.toolchain/go/bin/go.exe' }
 if (-not (Test-Path -LiteralPath $goExe)) { throw 'Go 1.27.2 is required.' }
 New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
-foreach ($name in @('envtie','adapter-neon','adapter-upstash','adapter-github','adapter-stripe','adapter-sentry')) {
+foreach ($name in @('envtie','adapter-neon','adapter-upstash','adapter-github','adapter-stripe','adapter-sentry','adapter-mailtrap','adapter-vercel')) {
   # -buildvcs=false and an empty build id keep the SHA-256 pin stable across rebuilds.
   & $goExe build -trimpath -buildvcs=false -ldflags '-buildid=' -o (Join-Path 'dist' ($name + '.exe')) ('./cmd/' + $name)
   if ($LASTEXITCODE -ne 0) { throw "Build failed: $name" }
@@ -16,7 +16,7 @@ foreach ($name in @('envtie','adapter-neon','adapter-upstash','adapter-github','
 }
 $arch = (& $goExe env GOARCH).Trim()
 $pins = [ordered]@{}
-foreach ($name in @('adapter-neon','adapter-upstash','adapter-github','adapter-stripe','adapter-sentry')) {
+foreach ($name in @('adapter-neon','adapter-upstash','adapter-github','adapter-stripe','adapter-sentry','adapter-mailtrap','adapter-vercel')) {
   $adapter = ($name -replace '^adapter-','') + '@1'
   $artifact = Get-Item -LiteralPath (Join-Path 'dist' ($name + '.exe'))
   $hash = (Get-FileHash -Algorithm SHA256 $artifact.FullName).Hash.ToLowerInvariant()

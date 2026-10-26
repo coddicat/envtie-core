@@ -20,12 +20,12 @@ import (
 
 var sha256Hex = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
 var targetName = regexp.MustCompile(`^[a-z0-9]+/[a-z0-9]+$`)
-var releaseArtifact = regexp.MustCompile(`^adapter-(neon|upstash|github|stripe|sentry)_(.+)_(linux|darwin|windows)_(amd64|arm64)(\.exe)?$`)
+var releaseArtifact = regexp.MustCompile(`^adapter-(neon|upstash|github|stripe|sentry|mailtrap|vercel)_(.+)_(linux|darwin|windows)_(amd64|arm64)(\.exe)?$`)
 
 // Official reports whether EnvTie.dev publishes this adapter and can vouch for its pin.
 func Official(adapter string) bool {
 	switch adapter {
-	case "neon@1", "upstash@1", "stripe@1", "github@1", "sentry@1":
+	case "neon@1", "upstash@1", "stripe@1", "github@1", "sentry@1", "mailtrap@1", "vercel@1":
 		return true
 	default:
 		return false

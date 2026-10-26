@@ -148,6 +148,20 @@ func GitHubBinding(destination string) (kind, name string, ok bool) {
 	return "", "", false
 }
 
+// VercelEnvBinding parses a branch-scoped Vercel project env destination.
+// The runner injects these into the vercel@1 apply request before deploy.
+func VercelEnvBinding(destination string) (name string, ok bool) {
+	const prefix = "vercel.env."
+	if !strings.HasPrefix(destination, prefix) {
+		return "", false
+	}
+	name = strings.TrimPrefix(destination, prefix)
+	if bindingName.MatchString(name) {
+		return name, true
+	}
+	return "", false
+}
+
 func githubBindingsWithoutProvider(b Blueprint) bool {
 	hasProvider := false
 	for _, c := range b.Components {
@@ -165,6 +179,70 @@ func githubBindingsWithoutProvider(b Blueprint) bool {
 		}
 	}
 	return false
+}
+
+func vercelBindingsWithoutProvider(b Blueprint) bool {
+	hasProvider := false
+	for _, c := range b.Components {
+		if c.Adapter == "vercel@1" {
+			hasProvider = true
+			break
+		}
+	}
+	if hasProvider {
+		return false
+	}
+	for _, binding := range b.Bindings {
+		if _, ok := VercelEnvBinding(binding.To); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// vercelEnvSourcesOrdered ensures each vercel.env.* source is applied before
+// vercel@1 (direct or transitive depends_on), so the runner can inject outputs.
+func vercelEnvSourcesOrdered(b Blueprint, seen map[string]Component) error {
+	reachable := map[string]map[string]bool{}
+	var walk func(string, map[string]bool)
+	walk = func(id string, into map[string]bool) {
+		c, ok := seen[id]
+		if !ok {
+			return
+		}
+		for _, dep := range c.DependsOn {
+			if into[dep] {
+				continue
+			}
+			into[dep] = true
+			walk(dep, into)
+		}
+	}
+	for id := range seen {
+		into := map[string]bool{}
+		walk(id, into)
+		reachable[id] = into
+	}
+	for _, binding := range b.Bindings {
+		if _, ok := VercelEnvBinding(binding.To); !ok {
+			continue
+		}
+		source := strings.SplitN(binding.From, ".", 2)[0]
+		ok := false
+		for _, c := range b.Components {
+			if c.Adapter != "vercel@1" {
+				continue
+			}
+			if reachable[c.ID][source] {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("vercel env binding %q requires vercel@1 to depend on %q", binding.To, source)
+		}
+	}
+	return nil
 }
 
 // HasGitHubProvider reports whether the blueprint declares the GitHub
@@ -214,7 +292,7 @@ func (b Blueprint) Validate() error {
 		if !adapterName.MatchString(c.Adapter) {
 			return fmt.Errorf("adapter %q must be pinned to a major version", c.Adapter)
 		}
-		official := c.Adapter == "neon@1" || c.Adapter == "upstash@1" || c.Adapter == "stripe@1" || c.Adapter == "github@1" || c.Adapter == "sentry@1"
+		official := c.Adapter == "neon@1" || c.Adapter == "upstash@1" || c.Adapter == "stripe@1" || c.Adapter == "github@1" || c.Adapter == "sentry@1" || c.Adapter == "mailtrap@1" || c.Adapter == "vercel@1"
 		if official && c.Source != nil {
 			return fmt.Errorf("%s: official adapters cannot override their source", c.ID)
 		}
@@ -272,7 +350,8 @@ func (b Blueprint) Validate() error {
 			return fmt.Errorf("binding source component %q absent", parts[0])
 		}
 		_, _, github := GitHubBinding(binding.To)
-		if !IsLocalBinding(binding.To) && !github {
+		_, vercel := VercelEnvBinding(binding.To)
+		if !IsLocalBinding(binding.To) && !github && !vercel {
 			return fmt.Errorf("unsupported binding destination %q", binding.To)
 		}
 		if destinations[binding.To] {
@@ -282,6 +361,12 @@ func (b Blueprint) Validate() error {
 	}
 	if githubBindingsWithoutProvider(b) {
 		return errors.New("GitHub environment bindings require a github@1 component")
+	}
+	if vercelBindingsWithoutProvider(b) {
+		return errors.New("Vercel env bindings require a vercel@1 component")
+	}
+	if err := vercelEnvSourcesOrdered(b, seen); err != nil {
+		return err
 	}
 	secrets := 0
 	for _, binding := range b.Bindings {

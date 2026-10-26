@@ -20,7 +20,7 @@ var modulePathPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._\-/]{0,191}$
 
 // Official catalog adapter names — private scaffolds must not collide.
 var reservedAdapterNames = map[string]struct{}{
-	"neon": {}, "upstash": {}, "stripe": {}, "sentry": {}, "github": {},
+	"neon": {}, "upstash": {}, "stripe": {}, "sentry": {}, "github": {}, "mailtrap": {}, "vercel": {},
 }
 
 type adapterScaffold struct {

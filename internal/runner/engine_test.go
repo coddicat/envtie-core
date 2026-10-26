@@ -16,6 +16,28 @@ import (
 	"github.com/coddicat/envtie-core/sdk/adapter"
 )
 
+func TestInjectVercelEnvBindingsSkipsCreationOnlyOnReplan(t *testing.T) {
+	cfg := map[string]string{"project_id": "prj"}
+	bindings := []core.Binding{
+		{From: "mail.MAILTRAP_SMTP_PASS", To: "vercel.env.MAILTRAP_SMTP_PASS"},
+		{From: "db.DATABASE_URL", To: "vercel.env.DATABASE_URL"},
+	}
+	outputs := map[string]string{"db.DATABASE_URL": "postgres://x"}
+	creationOnly := map[string]bool{"mail.MAILTRAP_SMTP_PASS": true}
+	if err := injectVercelEnvBindings(cfg, bindings, outputs, creationOnly, true, map[string]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg["env.DATABASE_URL"] != "postgres://x" {
+		t.Fatalf("%v", cfg)
+	}
+	if _, ok := cfg["env.MAILTRAP_SMTP_PASS"]; ok {
+		t.Fatal("creation-only value injected on replan")
+	}
+	if err := injectVercelEnvBindings(cfg, bindings, outputs, creationOnly, false, map[string]bool{}); err == nil {
+		t.Fatal("expected missing creation-only on first apply")
+	}
+}
+
 func TestApplyRecoversLostCreateResponseWithoutPersistingSecret(t *testing.T) {
 	component := core.Component{ID: "db", Adapter: "fake@1", Executable: "fake", SHA256: strings.Repeat("a", 64), Ownership: core.Managed}
 	b := core.Blueprint{Name: "preview", Components: []core.Component{component}, Bindings: []core.Binding{{From: "db.DATABASE_URL", To: "env.ENVTIE_TEST_DATABASE_URL"}}}

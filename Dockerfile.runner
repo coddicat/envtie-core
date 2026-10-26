@@ -13,7 +13,7 @@ COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build <<'EOF'
 set -eu
 mkdir -p /out/adapters /out/work
-for name in envtie adapter-neon adapter-upstash adapter-github adapter-stripe adapter-sentry; do
+for name in envtie adapter-neon adapter-upstash adapter-github adapter-stripe adapter-sentry adapter-mailtrap adapter-vercel; do
   dest=/out/adapters/$name
   [ "$name" = envtie ] && dest=/out/envtie
   CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -buildvcs=false \

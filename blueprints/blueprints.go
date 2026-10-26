@@ -19,6 +19,8 @@ func Names() []string {
 		"neon.yaml",
 		"stripe-webhook.yaml",
 		"sentry-project.yaml",
+		"mailtrap-inbox.yaml",
+		"vercel-hosting.yaml",
 		"referenced-neon.yaml",
 	}
 }

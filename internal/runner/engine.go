@@ -98,16 +98,21 @@ func (e Engine) Apply(ctx context.Context, plan core.Plan, env *core.Environment
 		c := a.Component
 		var createOutputs map[string]string
 		prior, exists := env.Resources[c.ID]
-		req := adapter.Request{Protocol: adapter.ProtocolVersion, Environment: env.Name, Component: c.ID, Config: c.Config, IdempotencyKey: plan.ID + "/" + c.ID}
+		req := adapter.Request{Protocol: adapter.ProtocolVersion, Environment: env.Name, Component: c.ID, Config: copyConfig(c.Config), IdempotencyKey: plan.ID + "/" + c.ID}
 		if exists {
 			req.ExternalID = prior.ExternalID
 		}
 		if c.Ownership == core.Referenced {
 			req.ExternalID = c.Config["id"]
 		}
+		if c.Adapter == "vercel@1" {
+			if err := injectVercelEnvBindings(req.Config, plan.Bindings, outputs, creationOnly, previouslyReady, createdNow); err != nil {
+				return e.fail(env, err)
+			}
+		}
 		if req.ExternalID == "" && c.Ownership == core.Managed {
 			// A deterministic provider name lets read-before-create recover from a lost POST response.
-			req.Config = copyConfig(c.Config)
+			// Preserve runner-injected keys (for example vercel env.*) already on req.Config.
 			req.Config["name"] = managedConfigName(env.Name, c.ID)
 			appendLog(env, "info", c.ID+" read")
 			read, err := e.call(ctx, c, withHook(req, "read"))
@@ -131,6 +136,23 @@ func (e Engine) Apply(ctx context.Context, plan core.Plan, env *core.Environment
 			if c.Ownership == core.Referenced {
 				return e.fail(env, fmt.Errorf("%s: referenced id missing", c.ID))
 			}
+			appendLog(env, "info", c.ID+" apply")
+			resp, err := e.applyWithReconcile(ctx, c, req)
+			if err != nil {
+				return e.fail(env, err)
+			}
+			if resp.ExternalID == "" {
+				return e.fail(env, fmt.Errorf("%s: adapter returned no id", c.ID))
+			}
+			req.ExternalID = resp.ExternalID
+			createOutputs = resp.Outputs
+			createdNow[c.ID] = true
+			env.Resources[c.ID] = core.Resource{ComponentID: c.ID, Adapter: c.Adapter, Ownership: c.Ownership, ExternalID: resp.ExternalID, Status: "created"}
+			if err := e.save(env); err != nil {
+				return err
+			}
+		} else if c.Adapter == "vercel@1" && c.Ownership == core.Managed {
+			// Reconcile branch env vars and trigger a fresh preview deployment on every plan.
 			appendLog(env, "info", c.ID+" apply")
 			resp, err := e.applyWithReconcile(ctx, c, req)
 			if err != nil {
@@ -426,11 +448,12 @@ func (e Engine) Destroy(ctx context.Context, b core.Blueprint, env *core.Environ
 		if _, err := e.verifyAdapter(ctx, c); err != nil {
 			continue
 		}
-		if r.ExternalID == "" {
+		if r.ExternalID == "" && c.Adapter != "vercel@1" {
 			// Creation can be checkpointed before the provider ID is saved.
 			// Look up only the deterministic name from that create, then
 			// destroy the returned ID. An empty ID or a caller-supplied
 			// config name must not select an unrelated resource.
+			// vercel@1 cleans by git branch and does not need a saved deployment id.
 			resolved, absent, err := e.readManagedByName(ctx, env.Name, c)
 			if err != nil || (resolved == "" && !absent) {
 				continue
@@ -539,6 +562,11 @@ func (e Engine) bind(ctx context.Context, environment string, bindings []core.Bi
 			if _, _, ok := core.GitHubBinding(b.To); !ok || e.Deliver == nil {
 				return errors.New("GitHub Environment delivery unavailable")
 			}
+		case "vercel":
+			if _, ok := core.VercelEnvBinding(b.To); !ok {
+				return errors.New("invalid Vercel env binding")
+			}
+			// Delivered into the vercel@1 apply request before deploy.
 		default:
 			return errors.New("unsupported binding")
 		}
@@ -565,6 +593,8 @@ func (e Engine) bind(ctx context.Context, environment string, bindings []core.Bi
 			if err := e.Deliver(ctx, b.To, v); err != nil {
 				return err
 			}
+		case "vercel":
+			// Already applied during vercel@1.
 		}
 	}
 	if len(dotenv) == 0 {
@@ -576,6 +606,33 @@ func (e Engine) bind(ctx context.Context, environment string, bindings []core.Bi
 // bind keeps the local binding helper available to focused unit tests.
 func bind(environment string, bindings []core.Binding, outputs map[string]string) error {
 	return (Engine{}).bind(context.Background(), environment, bindings, outputs)
+}
+
+// injectVercelEnvBindings copies resolved outputs into config keys env.<NAME>
+// for the vercel adapter. Creation-only outputs (for example MAILTRAP_SMTP_PASS)
+// that were delivered on a prior READY apply are skipped so re-plans still work.
+func injectVercelEnvBindings(cfg map[string]string, bindings []core.Binding, outputs map[string]string, creationOnly map[string]bool, previouslyReady bool, createdNow map[string]bool) error {
+	if cfg == nil {
+		return errors.New("vercel config missing")
+	}
+	for _, b := range bindings {
+		name, ok := core.VercelEnvBinding(b.To)
+		if !ok {
+			continue
+		}
+		v, present := outputs[b.From]
+		if !present {
+			if creationOnly[b.From] {
+				component := strings.SplitN(b.From, ".", 2)[0]
+				if previouslyReady && !createdNow[component] {
+					continue
+				}
+			}
+			return fmt.Errorf("binding %s: output absent for Vercel env", b.From)
+		}
+		cfg["env."+name] = v
+	}
+	return nil
 }
 
 func environmentDotenvPath(environment string) (string, error) {
