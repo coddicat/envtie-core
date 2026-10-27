@@ -200,8 +200,10 @@ func vercelBindingsWithoutProvider(b Blueprint) bool {
 	return false
 }
 
-// vercelEnvSourcesOrdered ensures each vercel.env.* source is applied before
-// vercel@1 (direct or transitive depends_on), so the runner can inject outputs.
+// vercelEnvSourcesOrdered ensures each vercel.env.* source is ordered relative
+// to vercel@1: either vercel depends on the source (inject before first deploy),
+// or the source depends on vercel (runner refreshes env after the source applies,
+// for example Stripe webhook secrets that need VERCEL_URL first).
 func vercelEnvSourcesOrdered(b Blueprint, seen map[string]Component) error {
 	reachable := map[string]map[string]bool{}
 	var walk func(string, map[string]bool)
@@ -233,13 +235,13 @@ func vercelEnvSourcesOrdered(b Blueprint, seen map[string]Component) error {
 			if c.Adapter != "vercel@1" {
 				continue
 			}
-			if reachable[c.ID][source] {
+			if reachable[c.ID][source] || reachable[source][c.ID] {
 				ok = true
 				break
 			}
 		}
 		if !ok {
-			return fmt.Errorf("vercel env binding %q requires vercel@1 to depend on %q", binding.To, source)
+			return fmt.Errorf("vercel env binding %q requires an order between vercel@1 and %q", binding.To, source)
 		}
 	}
 	return nil

@@ -45,8 +45,13 @@ template and replace only its explicit placeholders.
 
 Official adapters include Neon, Upstash, Stripe, GitHub, Sentry, Mailtrap, and
 Vercel (`vercel@1` — branch preview deploy + env vars on an existing project).
+Stripe (`stripe@1`) registers one webhook per environment; `host` is a public
+hostname or URL. Pair with Vercel via `host: "{host.VERCEL_URL}"` and
+`depends_on: [host]`, or use your own preview DNS such as
+`{env}.preview.example.com` (see [`blueprints/stripe-webhook.yaml`](blueprints/stripe-webhook.yaml)).
 Custom providers can implement the protocol in [`sdk/adapter`](sdk/adapter); see
 [`examples/custom-adapter`](examples/custom-adapter) and `envtie adapter init`.
+`envtie help` summarizes runner env vars and the Stripe/Vercel host pattern.
 
 ## Development
 

@@ -92,6 +92,8 @@ func TestApplyUpsertsBranchEnvDeploysAndReturnsURL(t *testing.T) {
 				return jsonResp(200, `{"id":"dpl_2","url":"pr-7-app.vercel.app","readyState":"BUILDING","meta":{"githubCommitRef":"pr-7"}}`), nil
 			}
 			return jsonResp(200, `{"id":"dpl_2","url":"pr-7-app.vercel.app","readyState":"READY","meta":{"githubCommitRef":"pr-7"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/aliases"):
+			return jsonResp(200, `{"aliases":[{"alias":"test-consumer-envtie-git-pr-7-acme.vercel.app"}]}`), nil
 		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/v13/deployments/dpl_1"):
 			deletedPrev = true
 			return jsonResp(200, `{}`), nil
@@ -104,7 +106,7 @@ func TestApplyUpsertsBranchEnvDeploysAndReturnsURL(t *testing.T) {
 		Hook: "apply", Environment: "pr-7", Component: "host", ExternalID: "dpl_1",
 		Config: map[string]string{"project_id": "prj_app", "env.DATABASE_URL": "postgres://x"},
 	})
-	if err != nil || resp.ExternalID != "dpl_2" || resp.Outputs["VERCEL_URL"] != "https://pr-7-app.vercel.app" || !deletedPrev {
+	if err != nil || resp.ExternalID != "dpl_2" || resp.Outputs["VERCEL_URL"] != "https://test-consumer-envtie-git-pr-7-acme.vercel.app" || !deletedPrev {
 		t.Fatalf("%+v err=%v deletedPrev=%v", resp, err, deletedPrev)
 	}
 }

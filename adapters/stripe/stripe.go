@@ -135,6 +135,32 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 	return adapter.Response{}, errors.New("unsupported hook")
 }
 
+// normalizeHost accepts a bare hostname or a full https URL (for example
+// host.VERCEL_URL). {env} is replaced with the environment name.
+func normalizeHost(raw, environment string) (string, error) {
+	host := strings.TrimSpace(raw)
+	host = strings.ReplaceAll(host, "{env}", environment)
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "", adapter.NewError("stripe_host_invalid")
+	}
+	if strings.Contains(host, "://") {
+		u, err := url.Parse(host)
+		if err != nil || u.Host == "" {
+			return "", adapter.NewError("stripe_host_invalid")
+		}
+		host = u.Host
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "/"))
+	if i := strings.IndexByte(host, '/'); i >= 0 {
+		host = host[:i]
+	}
+	if !hostPattern.MatchString(host) {
+		return "", adapter.NewError("stripe_host_invalid")
+	}
+	return host, nil
+}
+
 // checkKey refuses live-mode keys unless the blueprint opts in explicitly, so a
 // preview environment cannot register endpoints on a production account by accident.
 func checkKey(key string, allowLive bool) error {
@@ -157,9 +183,9 @@ func createForm(r adapter.Request) (url.Values, error) {
 	if name == "" {
 		return nil, adapter.NewError("stripe_name_required")
 	}
-	host := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(r.Config["host"]), "{env}", r.Environment))
-	if !hostPattern.MatchString(host) {
-		return nil, adapter.NewError("stripe_host_invalid")
+	host, err := normalizeHost(r.Config["host"], r.Environment)
+	if err != nil {
+		return nil, err
 	}
 	path := r.Config["path"]
 	if path == "" {

@@ -24,7 +24,7 @@ func TestInjectVercelEnvBindingsSkipsCreationOnlyOnReplan(t *testing.T) {
 	}
 	outputs := map[string]string{"db.DATABASE_URL": "postgres://x"}
 	creationOnly := map[string]bool{"mail.MAILTRAP_SMTP_PASS": true}
-	if err := injectVercelEnvBindings(cfg, bindings, outputs, creationOnly, true, map[string]bool{}); err != nil {
+	if err := injectVercelEnvBindings(cfg, bindings, outputs, creationOnly, true, map[string]bool{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if cfg["env.DATABASE_URL"] != "postgres://x" {
@@ -33,8 +33,31 @@ func TestInjectVercelEnvBindingsSkipsCreationOnlyOnReplan(t *testing.T) {
 	if _, ok := cfg["env.MAILTRAP_SMTP_PASS"]; ok {
 		t.Fatal("creation-only value injected on replan")
 	}
-	if err := injectVercelEnvBindings(cfg, bindings, outputs, creationOnly, false, map[string]bool{}); err == nil {
+	if err := injectVercelEnvBindings(cfg, bindings, outputs, creationOnly, false, map[string]bool{}, nil); err == nil {
 		t.Fatal("expected missing creation-only on first apply")
+	}
+	deferred := map[string]string{"project_id": "prj"}
+	if err := injectVercelEnvBindings(deferred, bindings, outputs, creationOnly, false, map[string]bool{}, map[string]bool{"mail": true}); err != nil {
+		t.Fatal(err)
+	}
+	if deferred["env.DATABASE_URL"] != "postgres://x" {
+		t.Fatalf("%v", deferred)
+	}
+	if _, ok := deferred["env.MAILTRAP_SMTP_PASS"]; ok {
+		t.Fatal("pending source should defer creation-only output")
+	}
+}
+
+func TestExpandConfigRefsResolvesComponentOutputs(t *testing.T) {
+	cfg := map[string]string{"host": "{host.VERCEL_URL}", "path": "/api/webhooks/stripe", "note": "keep {env}"}
+	if err := expandConfigRefs(cfg, map[string]string{"host.VERCEL_URL": "https://app-git-feat.vercel.app"}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg["host"] != "https://app-git-feat.vercel.app" || cfg["note"] != "keep {env}" {
+		t.Fatalf("%v", cfg)
+	}
+	if err := expandConfigRefs(map[string]string{"host": "{host.VERCEL_URL}"}, nil); err == nil {
+		t.Fatal("missing output accepted")
 	}
 }
 

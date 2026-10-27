@@ -106,10 +106,26 @@ func TestVercelEnvBindingsRequireDependsOn(t *testing.T) {
 		{From: "db.DATABASE_URL", To: "vercel.env.DATABASE_URL"},
 		{From: "host.VERCEL_URL", To: "dotenv.VERCEL_URL"},
 	}}
-	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "depend on") {
+	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "order between") {
 		t.Fatal(err)
 	}
 	b.Components[1].DependsOn = []string{"db"}
+	if err := b.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVercelEnvBindingsAllowSourceAfterVercel(t *testing.T) {
+	b := Blueprint{Name: "preview", Components: []Component{
+		{ID: "host", Adapter: "vercel@1", Ownership: Managed, Config: map[string]string{"project_id": "prj_app"}},
+		{ID: "stripe_webhook", Adapter: "stripe@1", Ownership: Managed, DependsOn: []string{"host"}, Config: map[string]string{
+			"host": "{host.VERCEL_URL}", "path": "/api/webhooks/stripe", "events": "invoice.paid",
+		}},
+	}, Bindings: []Binding{
+		{From: "stripe_webhook.STRIPE_WEBHOOK_SECRET", To: "vercel.env.STRIPE_WEBHOOK_SECRET"},
+		{From: "stripe_webhook.STRIPE_WEBHOOK_ENDPOINT_ID", To: "vercel.env.STRIPE_WEBHOOK_ENDPOINT_ID"},
+		{From: "host.VERCEL_URL", To: "dotenv.VERCEL_URL"},
+	}}
 	if err := b.Validate(); err != nil {
 		t.Fatal(err)
 	}

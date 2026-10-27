@@ -94,8 +94,14 @@ func (e Engine) Apply(ctx context.Context, plan core.Plan, env *core.Environment
 	}
 	outputs := map[string]string{}
 	createdNow := map[string]bool{}
+	pendingLater := map[string]bool{}
+	for _, a := range plan.Actions {
+		pendingLater[a.Component.ID] = true
+	}
+	var vercelRefresh *core.Component
 	for _, a := range plan.Actions {
 		c := a.Component
+		delete(pendingLater, c.ID)
 		var createOutputs map[string]string
 		prior, exists := env.Resources[c.ID]
 		req := adapter.Request{Protocol: adapter.ProtocolVersion, Environment: env.Name, Component: c.ID, Config: copyConfig(c.Config), IdempotencyKey: plan.ID + "/" + c.ID}
@@ -105,10 +111,15 @@ func (e Engine) Apply(ctx context.Context, plan core.Plan, env *core.Environment
 		if c.Ownership == core.Referenced {
 			req.ExternalID = c.Config["id"]
 		}
+		if err := expandConfigRefs(req.Config, outputs); err != nil {
+			return e.fail(env, adapter.WithPlace(c.ID, "config", err))
+		}
 		if c.Adapter == "vercel@1" {
-			if err := injectVercelEnvBindings(req.Config, plan.Bindings, outputs, creationOnly, previouslyReady, createdNow); err != nil {
+			if err := injectVercelEnvBindings(req.Config, plan.Bindings, outputs, creationOnly, previouslyReady, createdNow, pendingLater); err != nil {
 				return e.fail(env, err)
 			}
+			comp := c
+			vercelRefresh = &comp
 		}
 		if req.ExternalID == "" && c.Ownership == core.Managed {
 			// A deterministic provider name lets read-before-create recover from a lost POST response.
@@ -199,6 +210,11 @@ func (e Engine) Apply(ctx context.Context, plan core.Plan, env *core.Environment
 			if creationOnly[c.ID+"."+k] {
 				outputs[c.ID+"."+k] = v
 			}
+		}
+	}
+	if vercelRefresh != nil {
+		if err := e.refreshVercelAfterSources(ctx, plan, env, *vercelRefresh, outputs, creationOnly, previouslyReady, createdNow); err != nil {
+			return err
 		}
 	}
 	bindings := make([]core.Binding, 0, len(plan.Bindings))
@@ -608,10 +624,40 @@ func bind(environment string, bindings []core.Binding, outputs map[string]string
 	return (Engine{}).bind(context.Background(), environment, bindings, outputs)
 }
 
+var configRefPattern = regexp.MustCompile(`\{([a-zA-Z][a-zA-Z0-9_-]*\.[A-Z][A-Z0-9_]*)\}`)
+
+// expandConfigRefs replaces {component.OUTPUT} placeholders with resolved
+// outputs from earlier actions (for example Stripe host from host.VERCEL_URL).
+// {env} is left for adapters that expand the environment name themselves.
+func expandConfigRefs(cfg map[string]string, outputs map[string]string) error {
+	if cfg == nil {
+		return nil
+	}
+	for key, value := range cfg {
+		var missing string
+		expanded := configRefPattern.ReplaceAllStringFunc(value, func(match string) string {
+			ref := match[1 : len(match)-1]
+			out, ok := outputs[ref]
+			if !ok {
+				missing = ref
+				return match
+			}
+			return out
+		})
+		if missing != "" {
+			return fmt.Errorf("config %s references unavailable output %s", key, missing)
+		}
+		cfg[key] = expanded
+	}
+	return nil
+}
+
 // injectVercelEnvBindings copies resolved outputs into config keys env.<NAME>
 // for the vercel adapter. Creation-only outputs (for example MAILTRAP_SMTP_PASS)
 // that were delivered on a prior READY apply are skipped so re-plans still work.
-func injectVercelEnvBindings(cfg map[string]string, bindings []core.Binding, outputs map[string]string, creationOnly map[string]bool, previouslyReady bool, createdNow map[string]bool) error {
+// Outputs from components still pending in the plan (for example Stripe after
+// host) are deferred; refreshVercelAfterSources injects them on a second deploy.
+func injectVercelEnvBindings(cfg map[string]string, bindings []core.Binding, outputs map[string]string, creationOnly map[string]bool, previouslyReady bool, createdNow map[string]bool, pendingLater map[string]bool) error {
 	if cfg == nil {
 		return errors.New("vercel config missing")
 	}
@@ -622,17 +668,88 @@ func injectVercelEnvBindings(cfg map[string]string, bindings []core.Binding, out
 		}
 		v, present := outputs[b.From]
 		if !present {
-			if creationOnly[b.From] {
-				component := strings.SplitN(b.From, ".", 2)[0]
-				if previouslyReady && !createdNow[component] {
-					continue
-				}
+			component := strings.SplitN(b.From, ".", 2)[0]
+			if creationOnly[b.From] && previouslyReady && !createdNow[component] {
+				continue
+			}
+			if pendingLater[component] {
+				continue
 			}
 			return fmt.Errorf("binding %s: output absent for Vercel env", b.From)
 		}
 		cfg["env."+name] = v
 	}
 	return nil
+}
+
+// refreshVercelAfterSources redeploys vercel@1 when later components produced
+// vercel.env.* outputs that were not available on the first host apply.
+func (e Engine) refreshVercelAfterSources(ctx context.Context, plan core.Plan, env *core.Environment, host core.Component, outputs map[string]string, creationOnly map[string]bool, previouslyReady bool, createdNow map[string]bool) error {
+	needed := false
+	for _, b := range plan.Bindings {
+		if _, ok := core.VercelEnvBinding(b.To); !ok {
+			continue
+		}
+		if _, ok := outputs[b.From]; !ok {
+			continue
+		}
+		component := strings.SplitN(b.From, ".", 2)[0]
+		if component == host.ID {
+			continue
+		}
+		if createdNow[component] {
+			needed = true
+			break
+		}
+	}
+	if !needed {
+		return nil
+	}
+	prior := env.Resources[host.ID]
+	req := adapter.Request{
+		Protocol: adapter.ProtocolVersion, Environment: env.Name, Component: host.ID,
+		Config: copyConfig(host.Config), IdempotencyKey: plan.ID + "/" + host.ID + "/refresh",
+		ExternalID: prior.ExternalID,
+	}
+	if err := expandConfigRefs(req.Config, outputs); err != nil {
+		return e.fail(env, adapter.WithPlace(host.ID, "config", err))
+	}
+	if err := injectVercelEnvBindings(req.Config, plan.Bindings, outputs, creationOnly, previouslyReady, createdNow, nil); err != nil {
+		return e.fail(env, err)
+	}
+	appendLog(env, "info", host.ID+" refresh")
+	resp, err := e.applyWithReconcile(ctx, host, req)
+	if err != nil {
+		return e.fail(env, err)
+	}
+	if resp.ExternalID == "" {
+		return e.fail(env, fmt.Errorf("%s: adapter returned no id", host.ID))
+	}
+	env.Resources[host.ID] = core.Resource{ComponentID: host.ID, Adapter: host.Adapter, Ownership: host.Ownership, ExternalID: resp.ExternalID, Status: "created"}
+	if err := e.save(env); err != nil {
+		return err
+	}
+	req.ExternalID = resp.ExternalID
+	if _, err := e.retry(ctx, host, withHook(req, "validate")); err != nil {
+		return e.fail(env, err)
+	}
+	r := env.Resources[host.ID]
+	r.Status = "ready"
+	env.Resources[host.ID] = r
+	outResp, err := e.retry(ctx, host, withHook(req, "outputs"))
+	if err != nil {
+		return e.fail(env, err)
+	}
+	for k, v := range outResp.Outputs {
+		outputs[host.ID+"."+k] = v
+	}
+	for k, v := range resp.Outputs {
+		if creationOnly[host.ID+"."+k] {
+			outputs[host.ID+"."+k] = v
+		}
+	}
+	appendLog(env, "info", host.ID+" ready")
+	return e.save(env)
 }
 
 func environmentDotenvPath(environment string) (string, error) {

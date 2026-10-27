@@ -1,3 +1,6 @@
+# Stripe without a host adapter: point host at your own public preview DNS.
+# With vercel@1, use host: "{host.VERCEL_URL}", depends_on: [host], and bind
+# secrets to vercel.env.* instead (see Blueprint wizard when both are selected).
 name: stripe-preview
 components:
   - id: stripe_webhook
@@ -6,7 +9,7 @@ components:
     config:
       host: "{env}.preview.example.com"
       path: /api/webhooks/stripe
-      events: checkout.session.completed,customer.subscription.updated,invoice.paid
+      events: payment_intent.created,payment_intent.succeeded,checkout.session.completed,customer.subscription.updated,invoice.paid
 bindings:
   - from: stripe_webhook.STRIPE_WEBHOOK_SECRET
     to: dotenv.STRIPE_WEBHOOK_SECRET

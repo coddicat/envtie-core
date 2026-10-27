@@ -184,6 +184,41 @@ func TestErrorCodes(t *testing.T) {
 	}
 }
 
+func TestNormalizeHostAcceptsURLAndEnvPlaceholder(t *testing.T) {
+	got, err := normalizeHost("https://pr-12-app-git-feat-team.vercel.app/", "pr-12")
+	if err != nil || got != "pr-12-app-git-feat-team.vercel.app" {
+		t.Fatalf("%q %v", got, err)
+	}
+	got, err = normalizeHost("{env}.preview.example.com", "pr-9")
+	if err != nil || got != "pr-9.preview.example.com" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if _, err := normalizeHost("https://localhost:3000", "pr-1"); err == nil {
+		t.Fatal("localhost must be rejected")
+	}
+}
+
+func TestApplyAcceptsVercelURLHost(t *testing.T) {
+	t.Setenv("STRIPE_SECRET_KEY", "sk_test_fixture")
+	useTransport(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method != "POST" || r.URL.Path != "/v1/webhook_endpoints" {
+			return respond(500, `{}`), nil
+		}
+		body, _ := io.ReadAll(r.Body)
+		form, _ := url.ParseQuery(string(body))
+		if form.Get("url") != "https://my-app-git-feat-acme.vercel.app/api/webhooks/stripe" {
+			t.Fatalf("url %q", form.Get("url"))
+		}
+		return respond(200, `{"id":"we_1","secret":"whsec_x","status":"enabled"}`), nil
+	})
+	req := request("apply")
+	req.Config["host"] = "https://my-app-git-feat-acme.vercel.app"
+	resp, err := Handler{}.Handle(context.Background(), req)
+	if err != nil || resp.ExternalID != "we_1" {
+		t.Fatalf("%+v %v", resp, err)
+	}
+}
+
 func TestLiveKeyAllowedWithExplicitOptIn(t *testing.T) {
 	t.Setenv("STRIPE_SECRET_KEY", "sk_live_x")
 	useTransport(t, func(r *http.Request) (*http.Response, error) {

@@ -153,6 +153,7 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 		if err != nil {
 			return adapter.Response{}, err
 		}
+		publicURL := resolvePublicURL(ctx, auth, teamID, dep, proj.Name, branch)
 		// Drop the previous EnvTie-tracked deployment so re-plans do not pile up.
 		if prev := strings.TrimSpace(r.ExternalID); prev != "" && prev != dep.ID {
 			endpoint := withTeam(apiBase+"/v13/deployments/"+url.PathEscape(prev), teamID)
@@ -164,7 +165,7 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 		return adapter.Response{
 			ExternalID: dep.ID,
 			Status:     "created",
-			Outputs:    outputs(dep, branch),
+			Outputs:    outputsWithURL(dep, branch, publicURL),
 		}, nil
 	case "outputs":
 		if r.ExternalID == "" {
@@ -234,15 +235,59 @@ func envFromConfig(cfg map[string]string) map[string]string {
 }
 
 func outputs(dep deployment, branch string) map[string]string {
-	url := strings.TrimSpace(dep.URL)
-	if url != "" && !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") {
-		url = "https://" + url
+	return outputsWithURL(dep, branch, "")
+}
+
+func outputsWithURL(dep deployment, branch, publicURL string) map[string]string {
+	u := strings.TrimSpace(publicURL)
+	if u == "" {
+		u = strings.TrimSpace(dep.URL)
+	}
+	if u != "" && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
+		u = "https://" + u
 	}
 	return map[string]string{
-		"VERCEL_URL":           url,
+		"VERCEL_URL":           u,
 		"VERCEL_DEPLOYMENT_ID": dep.ID,
 		"VERCEL_GIT_BRANCH":    branch,
 	}
+}
+
+// resolvePublicURL prefers the stable git-branch alias so Stripe webhooks and
+// other callbacks survive redeploys of the same branch.
+func resolvePublicURL(ctx context.Context, auth, teamID string, dep deployment, _projectName, _branch string) string {
+	if alias := branchAlias(ctx, auth, teamID, dep.ID); alias != "" {
+		return alias
+	}
+	return strings.TrimSpace(dep.URL)
+}
+
+func branchAlias(ctx context.Context, auth, teamID, deploymentID string) string {
+	if deploymentID == "" {
+		return ""
+	}
+	var body struct {
+		Aliases []struct {
+			Alias string `json:"alias"`
+		} `json:"aliases"`
+	}
+	status, err := httpclient.JSON(ctx, http.MethodGet, withTeam(apiBase+"/v2/deployments/"+url.PathEscape(deploymentID)+"/aliases", teamID), auth, nil, &body)
+	if err != nil || status >= 300 {
+		return ""
+	}
+	for _, item := range body.Aliases {
+		alias := strings.TrimSpace(strings.ToLower(item.Alias))
+		if alias == "" {
+			continue
+		}
+		if strings.Contains(alias, "-git-") {
+			if !strings.HasPrefix(alias, "https://") {
+				alias = "https://" + alias
+			}
+			return alias
+		}
+	}
+	return ""
 }
 
 func readyStatus(dep deployment) string {

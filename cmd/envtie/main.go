@@ -65,7 +65,15 @@ Commands:
 Runner environment:
   ENVTIE_API_URL, ENVTIE_RUNNER_TOKEN, ENVTIE_PUBLIC_KEY
   An interactive terminal prompts for any of these that are unset.
-  Provider values are prompted when an approved plan needs them.
+  Provider values are prompted when an approved plan needs them
+  (for example STRIPE_SECRET_KEY, VERCEL_TOKEN).
+
+Blueprints:
+  Author adapters in the EnvTie.dev Blueprint wizard or edit YAML.
+  stripe@1 host is a public hostname or https URL (not localhost).
+  With vercel@1 use host "{host.VERCEL_URL}" and depends_on host;
+  without Vercel use your own preview DNS such as {env}.preview.example.com.
+  Templates: blueprints/ in the envtie-core repo. Docs: https://envtie.dev/docs
 `)
 		return nil
 	case "version", "--version":
