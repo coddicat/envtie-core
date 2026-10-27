@@ -2,11 +2,13 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/coddicat/envtie-core/adapters/httpclient"
@@ -230,6 +232,45 @@ func deploymentCommit(r adapter.Request) string {
 	return strings.TrimSpace(os.Getenv("GITHUB_SHA"))
 }
 
+// deploymentDescription labels the GitHub Deployment with the EnvTie environment
+// id and, when running in Actions, "PR #<n> · <title>".
+func deploymentDescription(environment string) string {
+	title := strings.TrimSpace(pullRequestTitle(environment))
+	label := "EnvTie " + environment
+	if n, ok := strings.CutPrefix(environment, "pr-"); ok && title != "" {
+		label = "PR #" + n + " · " + title
+	}
+	if len(label) > 140 {
+		return label[:137] + "..."
+	}
+	return label
+}
+
+func pullRequestTitle(environment string) string {
+	path := strings.TrimSpace(os.Getenv("GITHUB_EVENT_PATH"))
+	if path == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var event struct {
+		PullRequest *struct {
+			Number int    `json:"number"`
+			Title  string `json:"title"`
+		} `json:"pull_request"`
+	}
+	if json.Unmarshal(raw, &event) != nil || event.PullRequest == nil {
+		return ""
+	}
+	pr := event.PullRequest
+	if environment != "pr-"+strconv.Itoa(pr.Number) {
+		return ""
+	}
+	return strings.TrimSpace(pr.Title)
+}
+
 func recordDeployment(ctx context.Context, environmentAPI, auth, name string, r adapter.Request) error {
 	sha := deploymentCommit(r)
 	if sha == "" {
@@ -242,12 +283,12 @@ func recordDeployment(ctx context.Context, environmentAPI, auth, name string, r 
 	status, err := httpclient.JSON(ctx, http.MethodPost, repoURL+"/deployments", auth, map[string]any{
 		"ref": nameRef(sha), "environment": name, "auto_merge": false,
 		"required_contexts": []string{}, "transient_environment": true,
-		"description": "Envtie pull-request preview",
+		"description": deploymentDescription(name),
 	}, &created)
 	if err != nil || created.ID <= 0 {
 		return classify(status, err)
 	}
-	state := map[string]any{"state": "in_progress", "environment": name, "description": "Envtie preview"}
+	state := map[string]any{"state": "in_progress", "environment": name, "description": deploymentDescription(name)}
 	if link := environmentURL(r); link != "" {
 		state["environment_url"] = link
 		state["state"] = "success"

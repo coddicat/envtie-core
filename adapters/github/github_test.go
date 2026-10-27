@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -166,6 +168,22 @@ func TestForeignEnvironmentIsRejected(t *testing.T) {
 	_, err := (Handler{}).Handle(context.Background(), adapter.Request{Hook: "apply", Environment: "pr-4", Config: map[string]string{"repository": "acme/app"}})
 	if err == nil || !strings.Contains(err.Error(), "github_environment_unmanaged") {
 		t.Fatal(err)
+	}
+}
+
+func TestDeploymentDescriptionIncludesPullRequestTitle(t *testing.T) {
+	event := `{"pull_request":{"number":12,"title":"Add checkout flow","head":{"ref":"feat","sha":"abc"}}}`
+	path := filepath.Join(t.TempDir(), "event.json")
+	if err := os.WriteFile(path, []byte(event), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GITHUB_EVENT_PATH", path)
+	got := deploymentDescription("pr-12")
+	if got != "PR #12 · Add checkout flow" {
+		t.Fatalf("%q", got)
+	}
+	if deploymentDescription("pr-99") != "EnvTie pr-99" {
+		t.Fatalf("mismatched PR must not use title: %q", deploymentDescription("pr-99"))
 	}
 }
 
