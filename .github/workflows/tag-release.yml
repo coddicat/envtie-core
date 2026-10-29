@@ -12,6 +12,8 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
+  actions: read
 
 concurrency:
   group: core-tag-release
@@ -25,6 +27,7 @@ jobs:
     permissions:
       contents: write
       actions: write
+      pull-requests: read
     steps:
       - uses: actions/checkout@v5
         with:
@@ -45,18 +48,33 @@ jobs:
             exit 1
           fi
           sha=$(git rev-parse HEAD)
+          # Squash/rebase merges create a new main SHA that never ran CI. Prefer a
+          # successful run on this SHA (manual dispatch), else the merged PR head.
+          workflow_ok() {
+            workflow=$1
+            commit=$2
+            conclusion=$(gh run list --workflow "$workflow" --commit "$commit" --limit 30 \
+              --json status,conclusion,event --jq \
+              '[.[] | select(.status=="completed" and (.event=="pull_request" or .event=="workflow_dispatch" or .event=="push"))][0].conclusion // empty')
+            [ "$conclusion" = success ]
+          }
           require() {
             workflow=$1
             label=$2
-            conclusion=$(gh run list --workflow "$workflow" --branch main --commit "$sha" --limit 20 \
-              --json status,conclusion --jq '[.[] | select(.status=="completed")][0].conclusion // empty')
-            if [ "$conclusion" != success ]; then
-              echo "::error::${label} is not green for ${sha}. Run that workflow on main (Actions → ${label} → Run workflow), then retry."
-              exit 1
+            if workflow_ok "$workflow" "$sha"; then
+              echo "${label}: green on ${sha}"
+              return 0
             fi
+            head=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${sha}/pulls" \
+              -H "Accept: application/vnd.github+json" \
+              --jq '[.[] | select(.merged_at != null)][0].head.sha // empty')
+            if [ -n "$head" ] && workflow_ok "$workflow" "$head"; then
+              echo "${label}: green on merged PR head ${head} (main ${sha})"
+              return 0
+            fi
+            echo "::error::${label} is not green for main ${sha} (or its merged PR). Merge a green PR, or run Actions → ${label} → Run workflow on main, then retry."
+            exit 1
           }
-          # CI and Docker smoke no longer run on push to main; dispatch them on
-          # this commit before tagging.
           require ci.yml "CI"
           require docker-smoke.yml "Docker smoke"
           git config user.name "github-actions[bot]"
