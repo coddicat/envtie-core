@@ -353,6 +353,9 @@ func createGitDeployment(ctx context.Context, auth, teamID string, proj project,
 	default:
 		return deployment{}, 0, adapter.NewError("vercel_git_unlinked")
 	}
+	// Omit target: the Deployments API only accepts "production", "staging", or
+	// a custom environment id. Preview is the default when target is absent;
+	// "preview" as a string is rejected with HTTP 400.
 	body := map[string]any{
 		"name":    proj.Name,
 		"project": proj.ID,
@@ -361,7 +364,6 @@ func createGitDeployment(ctx context.Context, auth, teamID string, proj project,
 			"repoId": proj.Link.RepoID,
 			"ref":    deployRef(branch),
 		},
-		"target": "preview",
 	}
 	var dep deployment
 	status, err := httpclient.JSON(ctx, http.MethodPost, withTeam(apiBase+"/v13/deployments", teamID), auth, body, &dep)
