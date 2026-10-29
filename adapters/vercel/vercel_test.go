@@ -217,6 +217,22 @@ func TestReadWrongBranchIsAbsent(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsCommitShaRef(t *testing.T) {
+	t.Setenv("VERCEL_TOKEN", "vt")
+	t.Setenv("GITHUB_SHA", "deadbeef")
+	t.Cleanup(func() { t.Setenv("GITHUB_SHA", "") })
+	withAPI(t, func(r *http.Request) (*http.Response, error) {
+		return jsonResp(200, `{"id":"dpl_1","url":"x.vercel.app","readyState":"READY","meta":{"githubCommitRef":"deadbeef","githubCommitSha":"deadbeef"}}`), nil
+	})
+	resp, err := Handler{}.Handle(context.Background(), adapter.Request{
+		Hook: "validate", Environment: "pr-7", ExternalID: "dpl_1", Component: "host",
+		Config: map[string]string{"project_id": "prj", "git_branch": "feature/x"},
+	})
+	if err != nil || resp.ExternalID != "dpl_1" {
+		t.Fatalf("%+v %v", resp, err)
+	}
+}
+
 func TestMissingTokenAndUnlinkedGit(t *testing.T) {
 	clearActionsContext(t)
 	t.Setenv("VERCEL_TOKEN", "")
@@ -279,12 +295,16 @@ func TestApplyUsesActionsBranchAndCommit(t *testing.T) {
 			var body map[string]any
 			_ = json.Unmarshal(raw, &body)
 			gs, _ := body["gitSource"].(map[string]any)
-			if gs["ref"] != "abc123def456" {
-				t.Fatalf("expected commit ref, got %s", raw)
+			if gs["ref"] != "feature/preview" {
+				t.Fatalf("expected branch ref for scoped env vars, got %s", raw)
+			}
+			gm, _ := body["gitMetadata"].(map[string]any)
+			if gm["commitRef"] != "feature/preview" || gm["commitSha"] != "abc123def456" {
+				t.Fatalf("gitMetadata %s", raw)
 			}
 			return jsonResp(200, `{"id":"dpl_sha","url":"feat.vercel.app","readyState":"BUILDING"}`), nil
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/v13/deployments/dpl_sha"):
-			return jsonResp(200, `{"id":"dpl_sha","url":"feat.vercel.app","readyState":"READY","meta":{"githubCommitRef":"feature/preview"}}`), nil
+			return jsonResp(200, `{"id":"dpl_sha","url":"feat.vercel.app","readyState":"READY","meta":{"githubCommitRef":"feature/preview","githubCommitSha":"abc123def456"}}`), nil
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/aliases"):
 			return jsonResp(200, `{"aliases":[]}`), nil
 		default:
