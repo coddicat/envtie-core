@@ -40,9 +40,17 @@ func jsonResp(status int, body string) *http.Response {
 	}
 }
 
+// clearActionsContext drops CI-injected git vars so tests that expect the
+// environment name as the branch stay deterministic under GitHub Actions.
+func clearActionsContext(t *testing.T) {
+	t.Helper()
+	t.Setenv("GITHUB_HEAD_REF", "")
+	t.Setenv("GITHUB_SHA", "")
+}
+
 func TestApplyUpsertsBranchEnvDeploysAndReturnsURL(t *testing.T) {
 	t.Setenv("VERCEL_TOKEN", "vt_fixture")
-	t.Setenv("GITHUB_HEAD_REF", "")
+	clearActionsContext(t)
 	created := false
 	ready := false
 	deletedPrev := false
@@ -113,6 +121,7 @@ func TestApplyUpsertsBranchEnvDeploysAndReturnsURL(t *testing.T) {
 
 func TestDestroyRemovesBranchEnvAndDeployments(t *testing.T) {
 	t.Setenv("VERCEL_TOKEN", "vt_fixture")
+	clearActionsContext(t)
 	deletedEnv, deletedTracked, deletedListed := false, false, false
 	listCalls := 0
 	withAPI(t, func(r *http.Request) (*http.Response, error) {
@@ -161,6 +170,7 @@ func TestDestroyRemovesBranchEnvAndDeployments(t *testing.T) {
 
 func TestDestroyWithoutExternalIDCleansBranch(t *testing.T) {
 	t.Setenv("VERCEL_TOKEN", "vt")
+	clearActionsContext(t)
 	deletedEnv := false
 	withAPI(t, func(r *http.Request) (*http.Response, error) {
 		switch {
@@ -191,6 +201,7 @@ func TestDestroyWithoutExternalIDCleansBranch(t *testing.T) {
 
 func TestReadWrongBranchIsAbsent(t *testing.T) {
 	t.Setenv("VERCEL_TOKEN", "vt")
+	clearActionsContext(t)
 	withAPI(t, func(r *http.Request) (*http.Response, error) {
 		return jsonResp(200, `{"id":"dpl_1","url":"x.vercel.app","readyState":"READY","meta":{"githubCommitRef":"other"}}`), nil
 	})
@@ -204,6 +215,7 @@ func TestReadWrongBranchIsAbsent(t *testing.T) {
 }
 
 func TestMissingTokenAndUnlinkedGit(t *testing.T) {
+	clearActionsContext(t)
 	t.Setenv("VERCEL_TOKEN", "")
 	_, err := Handler{}.Handle(context.Background(), adapter.Request{
 		Hook: "apply", Environment: "pr-7", Config: map[string]string{"project_id": "prj"},
