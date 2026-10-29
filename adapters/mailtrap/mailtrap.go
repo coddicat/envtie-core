@@ -85,7 +85,7 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 			}
 			return adapter.Response{ExternalID: strconv.FormatInt(found.ID, 10), Status: "ready"}, nil
 		}
-		box, status, err := getInbox(ctx, token, accountID, r.ExternalID)
+		box, status, err := getSandbox(ctx, token, accountID, r.ExternalID)
 		if status == http.StatusNotFound {
 			return adapter.Response{Absent: true}, nil
 		}
@@ -109,7 +109,7 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 				Outputs:    publicOutputs(existing),
 			}, nil
 		}
-		box, status, err := createInbox(ctx, token, accountID, projectID, name)
+		box, status, err := createSandbox(ctx, token, projectID, name)
 		if err != nil {
 			return adapter.Response{}, classify(status, err)
 		}
@@ -124,7 +124,7 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 		if r.ExternalID == "" {
 			return adapter.Response{}, adapter.NewError("mailtrap_inbox_missing")
 		}
-		box, status, err := getInbox(ctx, token, accountID, r.ExternalID)
+		box, status, err := getSandbox(ctx, token, accountID, r.ExternalID)
 		if err != nil {
 			return adapter.Response{}, classify(status, err)
 		}
@@ -147,7 +147,7 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 		if id == "" {
 			return adapter.Response{Absent: true}, nil
 		}
-		status, err := deleteInbox(ctx, token, accountID, id)
+		status, err := deleteSandbox(ctx, token, accountID, id)
 		if status == http.StatusNotFound {
 			return adapter.Response{Absent: true}, nil
 		}
@@ -196,37 +196,46 @@ func findByName(ctx context.Context, token, accountID, projectID, name string) (
 	return nil, nil
 }
 
-// listInboxes uses the account-scoped list. Mailtrap documents
-// GET /api/accounts/{account_id}/inboxes; GET .../projects/{id}/inboxes is
-// create-only and returns 404 for list (mailtrap_not_found on read-before-create).
+// listInboxes uses the account-scoped list (Mailtrap still exposes sandboxes
+// as inboxes here). Prefer this over GET .../projects/{id}/inboxes, which is
+// not a reliable list endpoint.
 func listInboxes(ctx context.Context, token, accountID string) ([]inbox, int, error) {
 	var list []inbox
 	status, err := doJSON(ctx, http.MethodGet, apiBase+"/accounts/"+url.PathEscape(accountID)+"/inboxes", token, nil, &list)
 	return list, status, err
 }
 
-func getInbox(ctx context.Context, token, accountID, inboxID string) (*inbox, int, error) {
+func getSandbox(ctx context.Context, token, accountID, sandboxID string) (*inbox, int, error) {
 	var box inbox
-	status, err := doJSON(ctx, http.MethodGet, apiBase+"/accounts/"+url.PathEscape(accountID)+"/inboxes/"+url.PathEscape(inboxID), token, nil, &box)
+	// Prefer the current sandboxes path; fall back to the legacy inbox path.
+	status, err := doJSON(ctx, http.MethodGet, apiBase+"/sandboxes/"+url.PathEscape(sandboxID), token, nil, &box)
+	if status == http.StatusNotFound {
+		status, err = doJSON(ctx, http.MethodGet, apiBase+"/accounts/"+url.PathEscape(accountID)+"/inboxes/"+url.PathEscape(sandboxID), token, nil, &box)
+	}
 	if err != nil {
 		return nil, status, err
 	}
 	return &box, status, nil
 }
 
-func createInbox(ctx context.Context, token, accountID, projectID, name string) (*inbox, int, error) {
+func createSandbox(ctx context.Context, token, projectID, name string) (*inbox, int, error) {
 	var box inbox
-	// Mailtrap create accepts {"name":"..."} on the project inboxes path.
-	body := map[string]any{"name": name}
-	status, err := doJSON(ctx, http.MethodPost, apiBase+"/accounts/"+url.PathEscape(accountID)+"/projects/"+url.PathEscape(projectID)+"/inboxes", token, body, &box)
+	// Current Mailtrap Email Sandbox API:
+	// POST /api/projects/{project_id}/sandboxes  {"sandbox":{"name":"..."}}
+	body := map[string]any{"sandbox": map[string]string{"name": name}}
+	status, err := doJSON(ctx, http.MethodPost, apiBase+"/projects/"+url.PathEscape(projectID)+"/sandboxes", token, body, &box)
 	if err != nil {
 		return nil, status, err
 	}
 	return &box, status, nil
 }
 
-func deleteInbox(ctx context.Context, token, accountID, inboxID string) (int, error) {
-	return doJSON(ctx, http.MethodDelete, apiBase+"/accounts/"+url.PathEscape(accountID)+"/inboxes/"+url.PathEscape(inboxID), token, nil, nil)
+func deleteSandbox(ctx context.Context, token, accountID, sandboxID string) (int, error) {
+	status, err := doJSON(ctx, http.MethodDelete, apiBase+"/sandboxes/"+url.PathEscape(sandboxID), token, nil, nil)
+	if status == http.StatusNotFound {
+		return doJSON(ctx, http.MethodDelete, apiBase+"/accounts/"+url.PathEscape(accountID)+"/inboxes/"+url.PathEscape(sandboxID), token, nil, nil)
+	}
+	return status, err
 }
 
 func doJSON(ctx context.Context, method, endpoint, token string, body any, target any) (int, error) {
@@ -255,7 +264,7 @@ func doJSON(ctx context.Context, method, endpoint, token string, body any, targe
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 400 {
-		return resp.StatusCode, fmt.Errorf("mailtrap http %d", resp.StatusCode)
+		return resp.StatusCode, fmt.Errorf("mailtrap http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	if target != nil && len(raw) > 0 {
 		if err := json.Unmarshal(raw, target); err != nil {
@@ -266,14 +275,27 @@ func doJSON(ctx context.Context, method, endpoint, token string, body any, targe
 }
 
 func classify(status int, err error) error {
+	msg := ""
+	if err != nil {
+		msg = strings.ToLower(err.Error())
+	}
+	quotaHint := strings.Contains(msg, "forbidden") || strings.Contains(msg, "limit") || strings.Contains(msg, "quota")
 	switch status {
-	case http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusUnauthorized:
+		return adapter.NewError("mailtrap_unauthorized")
+	case http.StatusForbidden:
+		if quotaHint {
+			return adapter.NewError("mailtrap_quota_exceeded")
+		}
 		return adapter.NewError("mailtrap_unauthorized")
 	case http.StatusNotFound:
 		return adapter.NewError("mailtrap_not_found")
 	case http.StatusTooManyRequests:
 		return adapter.NewError("mailtrap_rate_limited")
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		if quotaHint {
+			return adapter.NewError("mailtrap_quota_exceeded")
+		}
 		return adapter.NewError("mailtrap_invalid_request")
 	default:
 		if err != nil {

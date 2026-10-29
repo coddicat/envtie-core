@@ -4,10 +4,13 @@ All notable changes to EnvTie Core are documented here.
 
 ## Unreleased
 
+- `mailtrap@1`: create via `POST /api/projects/{id}/sandboxes` with
+  `{"sandbox":{"name":"..."}}` (current Mailtrap Email Sandbox API). Plan or
+  permission denials map to `mailtrap_quota_exceeded` instead of a vague
+  `mailtrap_invalid_request` / `mailtrap_unauthorized`.
 - `mailtrap@1`: list inboxes via `GET /api/accounts/{id}/inboxes` (and filter by
   project) instead of `GET .../projects/{id}/inboxes`, which is create-only and
-  returned 404 → `mailtrap_not_found` on read-before-create. Create body is
-  `{"name":"..."}` per current Mailtrap docs.
+  returned 404 → `mailtrap_not_found` on read-before-create.
 - `vercel@1`: omit Deployments API `target` for preview deploys. Sending
   `"target":"preview"` is invalid (only `production` / `staging` / custom env
   ids are accepted) and Vercel responds HTTP 400 → `vercel_invalid_request`.
