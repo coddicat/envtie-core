@@ -228,4 +228,60 @@ func TestManifest(t *testing.T) {
 	if m.Name != "vercel" || m.CredentialEnv[0] != "VERCEL_TOKEN" {
 		t.Fatalf("%+v", m)
 	}
+	names := map[string]bool{}
+	for _, name := range m.EnvNames() {
+		names[name] = true
+	}
+	if !names["GITHUB_HEAD_REF"] || !names["GITHUB_SHA"] {
+		t.Fatalf("expected Actions context in EnvNames, got %+v", m.EnvNames())
+	}
+}
+
+func TestApplyUsesActionsBranchAndCommit(t *testing.T) {
+	t.Setenv("VERCEL_TOKEN", "vt_fixture")
+	t.Setenv("GITHUB_HEAD_REF", "feature/preview")
+	t.Setenv("GITHUB_SHA", "abc123def456")
+	t.Cleanup(func() {
+		t.Setenv("GITHUB_HEAD_REF", "")
+		t.Setenv("GITHUB_SHA", "")
+	})
+	withAPI(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/v9/projects/prj_app"):
+			return jsonResp(200, `{"id":"prj_app","name":"app","link":{"type":"github","repoId":99,"repo":"app","org":"acme"}}`), nil
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/env"):
+			raw, _ := io.ReadAll(r.Body)
+			var items []map[string]any
+			if err := json.Unmarshal(raw, &items); err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 1 || items[0]["gitBranch"] != "feature/preview" {
+				t.Fatalf("env body %s", raw)
+			}
+			return jsonResp(201, `{"failed":[]}`), nil
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/v13/deployments"):
+			raw, _ := io.ReadAll(r.Body)
+			var body map[string]any
+			_ = json.Unmarshal(raw, &body)
+			gs, _ := body["gitSource"].(map[string]any)
+			if gs["ref"] != "abc123def456" {
+				t.Fatalf("expected commit ref, got %s", raw)
+			}
+			return jsonResp(200, `{"id":"dpl_sha","url":"feat.vercel.app","readyState":"BUILDING"}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/v13/deployments/dpl_sha"):
+			return jsonResp(200, `{"id":"dpl_sha","url":"feat.vercel.app","readyState":"READY","meta":{"githubCommitRef":"feature/preview"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/aliases"):
+			return jsonResp(200, `{"aliases":[]}`), nil
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.String())
+			return jsonResp(404, `{}`), nil
+		}
+	})
+	resp, err := Handler{}.Handle(context.Background(), adapter.Request{
+		Hook: "apply", Environment: "pr-27", Component: "host",
+		Config: map[string]string{"project_id": "prj_app", "env.DATABASE_URL": "postgres://x"},
+	})
+	if err != nil || resp.Outputs["VERCEL_GIT_BRANCH"] != "feature/preview" {
+		t.Fatalf("%+v %v", resp, err)
+	}
 }

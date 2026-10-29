@@ -24,6 +24,20 @@ func TestInjectVercelEnvBindingsSkipsCreationOnlyOnReplan(t *testing.T) {
 	}
 	outputs := map[string]string{"db.DATABASE_URL": "postgres://x"}
 	creationOnly := map[string]bool{"mail.MAILTRAP_SMTP_PASS": true}
+	t.Run("injectVercelGitBranch", func(t *testing.T) {
+		t.Setenv("GITHUB_HEAD_REF", "feature/from-actions")
+		cfg := map[string]string{"project_id": "prj"}
+		injectVercelGitBranch(cfg)
+		if cfg["git_branch"] != "feature/from-actions" {
+			t.Fatalf("got %#v", cfg)
+		}
+		cfg["git_branch"] = "{env}"
+		injectVercelGitBranch(cfg)
+		if cfg["git_branch"] != "{env}" {
+			t.Fatalf("must not override explicit git_branch: %#v", cfg)
+		}
+	})
+
 	if err := injectVercelEnvBindings(cfg, bindings, outputs, creationOnly, true, map[string]bool{}, nil); err != nil {
 		t.Fatal(err)
 	}

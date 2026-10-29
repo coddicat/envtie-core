@@ -115,6 +115,7 @@ func (e Engine) Apply(ctx context.Context, plan core.Plan, env *core.Environment
 			return e.fail(env, adapter.WithPlace(c.ID, "config", err))
 		}
 		if c.Adapter == "vercel@1" {
+			injectVercelGitBranch(req.Config)
 			if err := injectVercelEnvBindings(req.Config, plan.Bindings, outputs, creationOnly, previouslyReady, createdNow, pendingLater); err != nil {
 				return e.fail(env, err)
 			}
@@ -490,6 +491,9 @@ func (e Engine) Destroy(ctx context.Context, b core.Blueprint, env *core.Environ
 		appendLog(env, "info", c.ID+" destroy")
 		cfg := copyConfig(c.Config)
 		cfg["name"] = managedConfigName(env.Name, c.ID)
+		if c.Adapter == "vercel@1" {
+			injectVercelGitBranch(cfg)
+		}
 		req := adapter.Request{Protocol: adapter.ProtocolVersion, Hook: "destroy", Environment: env.Name, Component: c.ID, Config: cfg, ExternalID: r.ExternalID, IdempotencyKey: env.Name + "/destroy/" + c.ID}
 		if _, err := e.retry(ctx, c, req); err != nil {
 			continue
@@ -652,6 +656,18 @@ func expandConfigRefs(cfg map[string]string, outputs map[string]string) error {
 	return nil
 }
 
+// injectVercelGitBranch sets git_branch from GITHUB_HEAD_REF when the blueprint
+// uses PR mode (no git_branch). Adapter subprocesses only inherit declared
+// credentials, so the runner must copy the Actions branch into config.
+func injectVercelGitBranch(cfg map[string]string) {
+	if cfg == nil || strings.TrimSpace(cfg["git_branch"]) != "" {
+		return
+	}
+	if head := strings.TrimSpace(os.Getenv("GITHUB_HEAD_REF")); head != "" {
+		cfg["git_branch"] = head
+	}
+}
+
 // injectVercelEnvBindings copies resolved outputs into config keys env.<NAME>
 // for the vercel adapter. Creation-only outputs (for example MAILTRAP_SMTP_PASS)
 // that were delivered on a prior READY apply are skipped so re-plans still work.
@@ -714,6 +730,7 @@ func (e Engine) refreshVercelAfterSources(ctx context.Context, plan core.Plan, e
 	if err := expandConfigRefs(req.Config, outputs); err != nil {
 		return e.fail(env, adapter.WithPlace(host.ID, "config", err))
 	}
+	injectVercelGitBranch(req.Config)
 	if err := injectVercelEnvBindings(req.Config, plan.Bindings, outputs, creationOnly, previouslyReady, createdNow, nil); err != nil {
 		return e.fail(env, err)
 	}

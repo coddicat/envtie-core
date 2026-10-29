@@ -71,9 +71,14 @@ func (Handler) Manifest() adapter.Manifest {
 	return adapter.Manifest{
 		Name: "vercel", Version: "1.0.0", Protocol: 1,
 		Capabilities:  []string{"read", "apply", "validate", "outputs", "destroy"},
-		CredentialEnv: []string{"VERCEL_TOKEN"},
+		// GITHUB_HEAD_REF / GITHUB_SHA are Actions context. Without them the
+		// runner would fall back to the EnvTie environment name (pr-N), which is
+		// not a git branch and Vercel rejects with 400.
+		CredentialEnv: []string{"VERCEL_TOKEN", "GITHUB_HEAD_REF", "GITHUB_SHA"},
 		Inputs: []adapter.Input{
 			{Name: "VERCEL_TOKEN", Kind: adapter.InputSecret, Required: true, Description: "Vercel access token with project deploy and env permissions"},
+			{Name: "GITHUB_HEAD_REF", Kind: adapter.InputContext, Required: false, Description: "PR head branch from GitHub Actions (preferred git_branch when config omits it)"},
+			{Name: "GITHUB_SHA", Kind: adapter.InputContext, Required: false, Description: "Commit SHA; used as gitSource.ref when set so the deploy matches the PR head"},
 		},
 		Outputs: []adapter.Field{
 			{Name: "VERCEL_URL", Sensitivity: "PUBLIC"},
@@ -222,6 +227,15 @@ func resolveBranch(r adapter.Request) (string, error) {
 	return branch, nil
 }
 
+// deployRef is the gitSource.ref sent to Vercel. Prefer the Actions commit so
+// the build matches the PR head; otherwise deploy the resolved branch tip.
+func deployRef(branch string) string {
+	if sha := strings.TrimSpace(os.Getenv("GITHUB_SHA")); sha != "" {
+		return sha
+	}
+	return branch
+}
+
 func envFromConfig(cfg map[string]string) map[string]string {
 	out := map[string]string{}
 	for k, v := range cfg {
@@ -345,7 +359,7 @@ func createGitDeployment(ctx context.Context, auth, teamID string, proj project,
 		"gitSource": map[string]any{
 			"type":   linkType,
 			"repoId": proj.Link.RepoID,
-			"ref":    branch,
+			"ref":    deployRef(branch),
 		},
 		"target": "preview",
 	}
