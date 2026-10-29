@@ -4,7 +4,7 @@
 
 Public customer-side components and contracts for [EnvTie.dev](https://envtie.dev):
 
-> Public beta: pin `v1.7.0-beta.4` explicitly. Prerelease interfaces may change
+> Public beta: pin `v1.7.0-beta.5` explicitly. Prerelease interfaces may change
 > before general availability.
 
 - `envtie` CLI and workspace runner
@@ -31,7 +31,7 @@ Or run a long-lived workspace runner:
 docker run --rm \
   -e ENVTIE_API_URL=https://envtie.dev \
   -e ENVTIE_RUNNER_TOKEN \
-  ghcr.io/coddicat/envtie-runner:1.7.0-beta.4
+  ghcr.io/coddicat/envtie-runner:1.7.0-beta.5
 ```
 
 Runner tokens and provider credentials should be supplied by a secret manager.
