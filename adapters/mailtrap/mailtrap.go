@@ -180,21 +180,28 @@ func publicOutputs(box *inbox) map[string]string {
 }
 
 func findByName(ctx context.Context, token, accountID, projectID, name string) (*inbox, error) {
-	list, status, err := listInboxes(ctx, token, accountID, projectID)
+	list, status, err := listInboxes(ctx, token, accountID)
 	if err != nil {
 		return nil, classify(status, err)
 	}
+	wantProject, err := strconv.ParseInt(projectID, 10, 64)
+	if err != nil {
+		return nil, adapter.NewError("mailtrap_project_required")
+	}
 	for i := range list {
-		if list[i].Name == name {
+		if list[i].Name == name && list[i].ProjectID == wantProject {
 			return &list[i], nil
 		}
 	}
 	return nil, nil
 }
 
-func listInboxes(ctx context.Context, token, accountID, projectID string) ([]inbox, int, error) {
+// listInboxes uses the account-scoped list. Mailtrap documents
+// GET /api/accounts/{account_id}/inboxes; GET .../projects/{id}/inboxes is
+// create-only and returns 404 for list (mailtrap_not_found on read-before-create).
+func listInboxes(ctx context.Context, token, accountID string) ([]inbox, int, error) {
 	var list []inbox
-	status, err := doJSON(ctx, http.MethodGet, apiBase+"/accounts/"+url.PathEscape(accountID)+"/projects/"+url.PathEscape(projectID)+"/inboxes", token, nil, &list)
+	status, err := doJSON(ctx, http.MethodGet, apiBase+"/accounts/"+url.PathEscape(accountID)+"/inboxes", token, nil, &list)
 	return list, status, err
 }
 
@@ -209,7 +216,8 @@ func getInbox(ctx context.Context, token, accountID, inboxID string) (*inbox, in
 
 func createInbox(ctx context.Context, token, accountID, projectID, name string) (*inbox, int, error) {
 	var box inbox
-	body := map[string]any{"inbox": map[string]string{"name": name}}
+	// Mailtrap create accepts {"name":"..."} on the project inboxes path.
+	body := map[string]any{"name": name}
 	status, err := doJSON(ctx, http.MethodPost, apiBase+"/accounts/"+url.PathEscape(accountID)+"/projects/"+url.PathEscape(projectID)+"/inboxes", token, body, &box)
 	if err != nil {
 		return nil, status, err

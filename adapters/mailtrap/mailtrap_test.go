@@ -42,7 +42,7 @@ func TestLifecycleCreatesInboxAndReturnsSMTP(t *testing.T) {
 			t.Errorf("auth %s", r.Header.Get("Api-Token"))
 		}
 		switch {
-		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/projects/99/inboxes"):
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/accounts/1/inboxes"):
 			if !created {
 				return http.StatusOK, `[]`
 			}
@@ -51,8 +51,7 @@ func TestLifecycleCreatesInboxAndReturnsSMTP(t *testing.T) {
 			body, _ := io.ReadAll(r.Body)
 			var in map[string]any
 			_ = json.Unmarshal(body, &in)
-			inbox, _ := in["inbox"].(map[string]any)
-			if inbox["name"] != "pr-7-mail" {
+			if in["name"] != "pr-7-mail" {
 				t.Errorf("create body %s", body)
 			}
 			created = true
