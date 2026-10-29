@@ -47,18 +47,19 @@ func TestLifecycleCreatesInboxAndReturnsSMTP(t *testing.T) {
 				return http.StatusOK, `[]`
 			}
 			return http.StatusOK, `[{"id":42,"name":"pr-7-mail","username":"user","password":"pass","smtp_ports":[2525],"project_id":99,"status":"active"}]`
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/projects/99/inboxes"):
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/projects/99/sandboxes"):
 			body, _ := io.ReadAll(r.Body)
 			var in map[string]any
 			_ = json.Unmarshal(body, &in)
-			if in["name"] != "pr-7-mail" {
+			sandbox, _ := in["sandbox"].(map[string]any)
+			if sandbox["name"] != "pr-7-mail" {
 				t.Errorf("create body %s", body)
 			}
 			created = true
 			return http.StatusOK, `{"id":42,"name":"pr-7-mail","username":"user","password":"secret-pass","smtp_ports":[2525,587],"project_id":99,"status":"active"}`
-		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/inboxes/42"):
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/42"):
 			return http.StatusOK, `{"id":42,"name":"pr-7-mail","username":"user","password":"secret-pass","smtp_ports":[2525],"project_id":99,"status":"active"}`
-		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/inboxes/42"):
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/sandboxes/42"):
 			created = false
 			return http.StatusOK, `{}`
 		default:
@@ -102,5 +103,27 @@ func TestManifestDeclaresCredential(t *testing.T) {
 	m := Handler{}.Manifest()
 	if m.Name != "mailtrap" || len(m.CredentialEnv) != 1 || m.CredentialEnv[0] != "MAILTRAP_API_TOKEN" {
 		t.Fatalf("%+v", m)
+	}
+}
+
+func TestCreateForbiddenMapsToQuota(t *testing.T) {
+	t.Setenv("MAILTRAP_API_TOKEN", "mt_fixture")
+	withAPI(t, func(r *http.Request) (int, string) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/accounts/1/inboxes"):
+			return http.StatusOK, `[]`
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/projects/99/sandboxes"):
+			return http.StatusForbidden, `{"errors":"Access forbidden"}`
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			return http.StatusNotFound, `{}`
+		}
+	})
+	_, err := Handler{}.Handle(context.Background(), adapter.Request{
+		Hook: "apply", Environment: "pr-7", Component: "mail",
+		Config: map[string]string{"account_id": "1", "project_id": "99", "name": "pr-7-mail"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "mailtrap_quota_exceeded") {
+		t.Fatalf("err=%v", err)
 	}
 }
