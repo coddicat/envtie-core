@@ -227,13 +227,15 @@ func resolveBranch(r adapter.Request) (string, error) {
 	return branch, nil
 }
 
-// deployRef is the gitSource.ref sent to Vercel. Prefer the Actions commit so
-// the build matches the PR head; otherwise deploy the resolved branch tip.
+// deployRef is the gitSource.ref sent to Vercel. Prefer the git branch so
+// Vercel attaches gitBranch-scoped preview env vars (Upstash, Neon, …). A bare
+// commit SHA deploy often skips those vars and the app reports them missing.
+// PR apply runs against the branch tip, which is the PR head at synchronize.
 func deployRef(branch string) string {
-	if sha := strings.TrimSpace(os.Getenv("GITHUB_SHA")); sha != "" {
-		return sha
+	if branch = strings.TrimSpace(branch); branch != "" {
+		return branch
 	}
-	return branch
+	return strings.TrimSpace(os.Getenv("GITHUB_SHA"))
 }
 
 func envFromConfig(cfg map[string]string) map[string]string {
@@ -312,14 +314,30 @@ func readyStatus(dep deployment) string {
 }
 
 func deploymentMatchesBranch(dep deployment, branch string) bool {
-	if meta := dep.Meta; meta != nil {
-		for _, key := range []string{"githubCommitRef", "gitlabCommitRef", "bitbucketCommitRef", "gitBranch"} {
-			if ref := strings.TrimSpace(meta[key]); ref != "" {
-				return ref == branch
-			}
+	meta := dep.Meta
+	if meta == nil {
+		// ID-based lookups are authoritative when the provider omits commit meta.
+		return true
+	}
+	sha := strings.TrimSpace(os.Getenv("GITHUB_SHA"))
+	// Prefer commit SHA when Actions (or gitMetadata) supplied one: deploys that
+	// use gitSource.ref=<sha> often store that SHA as githubCommitRef, not the branch.
+	for _, key := range []string{"githubCommitSha", "gitlabCommitSha", "bitbucketCommitSha"} {
+		if commit := strings.TrimSpace(meta[key]); commit != "" && sha != "" && strings.EqualFold(commit, sha) {
+			return true
 		}
 	}
-	// ID-based lookups are authoritative when the provider omits commit meta.
+	for _, key := range []string{"githubCommitRef", "gitlabCommitRef", "bitbucketCommitRef", "gitBranch"} {
+		if ref := strings.TrimSpace(meta[key]); ref != "" {
+			if ref == branch {
+				return true
+			}
+			if sha != "" && strings.EqualFold(ref, sha) {
+				return true
+			}
+			return false
+		}
+	}
 	return true
 }
 
@@ -356,14 +374,22 @@ func createGitDeployment(ctx context.Context, auth, teamID string, proj project,
 	// Omit target: the Deployments API only accepts "production", "staging", or
 	// a custom environment id. Preview is the default when target is absent;
 	// "preview" as a string is rejected with HTTP 400.
+	ref := deployRef(branch)
+	meta := map[string]any{"commitRef": branch}
+	if sha := strings.TrimSpace(os.Getenv("GITHUB_SHA")); sha != "" {
+		meta["commitSha"] = sha
+	} else if ref != branch {
+		meta["commitSha"] = ref
+	}
 	body := map[string]any{
 		"name":    proj.Name,
 		"project": proj.ID,
 		"gitSource": map[string]any{
 			"type":   linkType,
 			"repoId": proj.Link.RepoID,
-			"ref":    deployRef(branch),
+			"ref":    ref,
 		},
+		"gitMetadata": meta,
 	}
 	var dep deployment
 	status, err := httpclient.JSON(ctx, http.MethodPost, withTeam(apiBase+"/v13/deployments", teamID), auth, body, &dep)
