@@ -70,7 +70,7 @@ type envList struct {
 func (Handler) Manifest() adapter.Manifest {
 	return adapter.Manifest{
 		Name: "vercel", Version: "1.0.0", Protocol: 1,
-		Capabilities:  []string{"read", "apply", "validate", "outputs", "destroy"},
+		Capabilities: []string{"read", "apply", "validate", "outputs", "destroy"},
 		// GITHUB_HEAD_REF / GITHUB_SHA are Actions context. Without them the
 		// runner would fall back to the EnvTie environment name (pr-N), which is
 		// not a git branch and Vercel rejects with 400.
