@@ -10,16 +10,6 @@ on:
       - "internal/**"
       - "adapters/**"
       - "sdk/**"
-  push:
-    branches: [main]
-    paths:
-      - "Dockerfile.runner"
-      - "go.mod"
-      - "go.sum"
-      - "cmd/**"
-      - "internal/**"
-      - "adapters/**"
-      - "sdk/**"
   workflow_dispatch:
 
 permissions:

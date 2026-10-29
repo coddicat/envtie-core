@@ -51,27 +51,14 @@ jobs:
             conclusion=$(gh run list --workflow "$workflow" --branch main --commit "$sha" --limit 20 \
               --json status,conclusion --jq '[.[] | select(.status=="completed")][0].conclusion // empty')
             if [ "$conclusion" != success ]; then
-              echo "::error::${label} is not green for ${sha}"
+              echo "::error::${label} is not green for ${sha}. Run that workflow on main (Actions → ${label} → Run workflow), then retry."
               exit 1
             fi
           }
+          # CI and Docker smoke no longer run on push to main; dispatch them on
+          # this commit before tagging.
           require ci.yml "CI"
-          # security.yml was removed; CI covers the green-main gate for tagging.
-          smoke=$(gh run list --workflow docker-smoke.yml --branch main --limit 20 \
-            --json status,conclusion,headSha --jq '[.[] | select(.status=="completed")][0] // empty')
-          if [ -z "$smoke" ]; then
-            echo "::error::Docker smoke has no completed run on main"
-            exit 1
-          fi
-          smoke_sha=$(printf '%s' "$smoke" | jq -r '.headSha')
-          smoke_conclusion=$(printf '%s' "$smoke" | jq -r '.conclusion')
-          if [ "$smoke_conclusion" != success ]; then
-            echo "::error::The latest Docker smoke run on main did not succeed"
-            exit 1
-          fi
-          if [ "$smoke_sha" != "$sha" ]; then
-            echo "Docker smoke last succeeded on ${smoke_sha}; this commit did not change the runner image inputs."
-          fi
+          require docker-smoke.yml "Docker smoke"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$VERSION" -m "EnvTie Core ${VERSION}"
