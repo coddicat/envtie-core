@@ -86,7 +86,10 @@ func TestApplyUpsertsBranchEnvDeploysAndReturnsURL(t *testing.T) {
 			var body map[string]any
 			_ = json.Unmarshal(raw, &body)
 			gs, _ := body["gitSource"].(map[string]any)
-			if body["target"] != "preview" || gs["ref"] != "pr-7" || gs["type"] != "github" {
+			if _, hasTarget := body["target"]; hasTarget {
+				t.Fatalf("preview deploy must omit target, got %s", raw)
+			}
+			if gs["ref"] != "pr-7" || gs["type"] != "github" {
 				t.Fatalf("deploy body %s", raw)
 			}
 			created = true
