@@ -657,3 +657,21 @@ func TestWorkflowPullRequestMatchesEnvironment(t *testing.T) {
 		t.Fatal("metadata was sent for another environment")
 	}
 }
+
+func TestEnsureActionsGitContextSeedsMissingVars(t *testing.T) {
+	t.Setenv("GITHUB_HEAD_REF", "")
+	t.Setenv("GITHUB_SHA", "")
+	ensureActionsGitContext(map[string]any{"branch": "feature/checkout", "sha": "abc123"})
+	if got := os.Getenv("GITHUB_HEAD_REF"); got != "feature/checkout" {
+		t.Fatalf("GITHUB_HEAD_REF=%q", got)
+	}
+	if got := os.Getenv("GITHUB_SHA"); got != "abc123" {
+		t.Fatalf("GITHUB_SHA=%q", got)
+	}
+	t.Setenv("GITHUB_HEAD_REF", "already-set")
+	t.Setenv("GITHUB_SHA", "already-sha")
+	ensureActionsGitContext(map[string]any{"branch": "other", "sha": "other-sha"})
+	if os.Getenv("GITHUB_HEAD_REF") != "already-set" || os.Getenv("GITHUB_SHA") != "already-sha" {
+		t.Fatal("existing Actions context was overwritten")
+	}
+}

@@ -241,6 +241,9 @@ func previewLifecycle(action string, args []string) error {
 	var report any
 	if pr := workflowPullRequest(name); pr != nil {
 		report = map[string]any{"pull_request": pr}
+		// Adapter subprocesses only inherit CredentialEnv; seed Actions context
+		// from the event when the workflow omitted GITHUB_HEAD_REF / GITHUB_SHA.
+		ensureActionsGitContext(pr)
 	}
 	if err := automationSend(http.MethodPost, path, report, &result); err != nil {
 		return err
@@ -325,6 +328,25 @@ func workflowPullRequest(environment string) map[string]any {
 		"author":     pr.User.Login,
 		"state":      pr.State,
 		"url":        pr.HTMLURL,
+	}
+}
+
+// ensureActionsGitContext copies PR head branch/SHA into the process env when
+// the workflow did not set them. The Vercel adapter needs a real git branch
+// (not pr-<n>) and prefers the commit SHA as the deploy ref.
+func ensureActionsGitContext(pr map[string]any) {
+	if pr == nil {
+		return
+	}
+	if strings.TrimSpace(os.Getenv("GITHUB_HEAD_REF")) == "" {
+		if branch, _ := pr["branch"].(string); strings.TrimSpace(branch) != "" {
+			_ = os.Setenv("GITHUB_HEAD_REF", strings.TrimSpace(branch))
+		}
+	}
+	if strings.TrimSpace(os.Getenv("GITHUB_SHA")) == "" {
+		if sha, _ := pr["sha"].(string); strings.TrimSpace(sha) != "" {
+			_ = os.Setenv("GITHUB_SHA", strings.TrimSpace(sha))
+		}
 	}
 }
 
