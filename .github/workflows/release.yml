@@ -41,14 +41,20 @@ jobs:
       - run: go test ./...
       - name: Cross-compile once
         run: sh scripts/release-binaries.sh "$TAG" dist
-      - uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: "dist/*"
+      # Upload before attest so a Rekor outage cannot block npm / GitHub Release.
       - uses: actions/upload-artifact@v7
         with:
           name: core-binaries
           path: dist/*
           retention-days: 7
+      - id: attest-binaries
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
+      - name: Warn if binary attestation failed
+        if: steps.attest-binaries.outcome == 'failure'
+        run: echo "::warning::Sigstore attestation for binaries failed (often Rekor timeout). Artifacts were still uploaded."
 
   runner:
     name: Runner image
@@ -107,23 +113,32 @@ jobs:
           done
           echo "::error::Grant coddicat/envtie-core Actions write access on the envtie-runner package, then rerun Release."
           exit 1
-      - uses: actions/attest-build-provenance@v2
+      - id: attest-image
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v2
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/envtie-runner
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true
       - id: sbom
+        continue-on-error: true
         uses: anchore/sbom-action@v0
         with:
           image: ghcr.io/${{ github.repository_owner }}/envtie-runner@${{ steps.image.outputs.digest }}
           format: spdx-json
           output-file: runner.spdx.json
-      - uses: actions/attest-sbom@v2
+      - id: attest-sbom
+        if: steps.sbom.outcome == 'success'
+        continue-on-error: true
+        uses: actions/attest-sbom@v2
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/envtie-runner
           subject-digest: ${{ steps.image.outputs.digest }}
           sbom-path: runner.spdx.json
           push-to-registry: true
+      - name: Warn if image attestation failed
+        if: steps.attest-image.outcome == 'failure' || steps.sbom.outcome == 'failure' || steps.attest-sbom.outcome == 'failure'
+        run: echo "::warning::Sigstore/SBOM attestation for the runner image failed (often Rekor timeout). The image was still pushed."
 
   npm:
     name: npm packages
@@ -162,7 +177,12 @@ jobs:
               echo "skip ${name}@${ver} (already on npm)"
               return 0
             fi
-            npm publish "$pkg" --access public --tag "$channel" --provenance
+            if npm publish "$pkg" --access public --tag "$channel" --provenance; then
+              return 0
+            fi
+            # Sigstore Rekor flakes (409 / timeout) should not leave a release half-published.
+            echo "::warning::provenance publish failed for ${name}@${ver}; retrying without provenance"
+            npm publish "$pkg" --access public --tag "$channel"
           }
           for package in dist/npm/cli-*; do publish_one "$package"; done
           publish_one dist/npm/cli
