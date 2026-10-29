@@ -152,8 +152,20 @@ jobs:
         run: |
           set -eu
           channel=latest; case "$TAG" in *-*) channel=next ;; esac
-          for package in dist/npm/cli-*; do npm publish "$package" --access public --tag "$channel" --provenance; done
-          npm publish dist/npm/cli --access public --tag "$channel" --provenance
+          # Skip versions already on npm so a partial Release (e.g. Sigstore tlog
+          # flake mid-loop) can be re-run without "version already exists".
+          publish_one() {
+            pkg=$1
+            name=$(node -p "require('./${pkg}/package.json').name")
+            ver=$(node -p "require('./${pkg}/package.json').version")
+            if npm view "${name}@${ver}" version >/dev/null 2>&1; then
+              echo "skip ${name}@${ver} (already on npm)"
+              return 0
+            fi
+            npm publish "$pkg" --access public --tag "$channel" --provenance
+          }
+          for package in dist/npm/cli-*; do publish_one "$package"; done
+          publish_one dist/npm/cli
 
   github:
     name: GitHub Release
