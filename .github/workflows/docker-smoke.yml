@@ -2,14 +2,6 @@ name: Docker smoke
 
 on:
   pull_request:
-    paths:
-      - "Dockerfile.runner"
-      - "go.mod"
-      - "go.sum"
-      - "cmd/**"
-      - "internal/**"
-      - "adapters/**"
-      - "sdk/**"
   workflow_dispatch:
 
 permissions:
