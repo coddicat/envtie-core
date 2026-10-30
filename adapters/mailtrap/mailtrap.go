@@ -1,5 +1,10 @@
-// Package mailtrap creates one Mailtrap Email Sandbox inbox per environment
-// and delivers SMTP credentials for the app under test.
+// Package mailtrap creates Mailtrap Email Sandbox inboxes and delivers SMTP
+// credentials for the app under test.
+//
+// Default mode is dedicated: one sandbox per environment (created and deleted
+// with that environment). Optional mode shared uses one sandbox per Mailtrap
+// project for every environment and isolates tests by a per-environment
+// recipient address (MAILTRAP_RECIPIENT_TAG).
 package mailtrap
 
 import (
@@ -15,14 +20,24 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/coddicat/envtie-core/sdk/adapter"
+)
+
+const (
+	modeDedicated      = "dedicated"
+	modeShared         = "shared"
+	defaultSharedName  = "envtie-shared"
+	recipientTagOutput = "MAILTRAP_RECIPIENT_TAG"
 )
 
 var (
 	apiBase = "https://mailtrap.io/api"
 	client  = &http.Client{Timeout: 30 * time.Second}
 	idNum   = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
+	// recipientDomainPat is a conservative hostname for address-level isolation.
+	recipientDomainPat = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$`)
 )
 
 // Handler implements the EnvTie adapter protocol for Mailtrap Email Sandboxes.
@@ -52,6 +67,7 @@ func (Handler) Manifest() adapter.Manifest {
 			{Name: "MAILTRAP_SMTP_PORT", Sensitivity: "PUBLIC"},
 			{Name: "MAILTRAP_SMTP_USER", Sensitivity: "SECRET"},
 			{Name: "MAILTRAP_SMTP_PASS", Sensitivity: "SECRET", Availability: adapter.AvailabilityCreate},
+			{Name: recipientTagOutput, Sensitivity: "PUBLIC"},
 		},
 	}
 }
@@ -69,6 +85,28 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 	if !idNum.MatchString(projectID) {
 		return adapter.Response{}, adapter.NewError("mailtrap_project_required")
 	}
+	mode, err := resolveMode(r.Config["mode"])
+	if err != nil {
+		return adapter.Response{}, err
+	}
+	if mode == modeShared {
+		return handleShared(ctx, token, accountID, projectID, r)
+	}
+	return handleDedicated(ctx, token, accountID, projectID, r)
+}
+
+func resolveMode(raw string) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	if mode == "" {
+		return modeDedicated, nil
+	}
+	if mode == modeDedicated || mode == modeShared {
+		return mode, nil
+	}
+	return "", adapter.NewError("mailtrap_mode_invalid")
+}
+
+func handleDedicated(ctx context.Context, token, accountID, projectID string, r adapter.Request) (adapter.Response, error) {
 	name := strings.TrimSpace(r.Config["name"])
 	switch r.Hook {
 	case "read", "validate":
@@ -106,14 +144,14 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 			return adapter.Response{
 				ExternalID: strconv.FormatInt(existing.ID, 10),
 				Status:     "ready",
-				Outputs:    publicOutputs(existing),
+				Outputs:    publicOutputs(existing, ""),
 			}, nil
 		}
 		box, status, err := createSandbox(ctx, token, projectID, name)
 		if err != nil {
 			return adapter.Response{}, classify(status, err)
 		}
-		out := publicOutputs(box)
+		out := publicOutputs(box, "")
 		out["MAILTRAP_SMTP_PASS"] = box.Password
 		return adapter.Response{
 			ExternalID: strconv.FormatInt(box.ID, 10),
@@ -131,7 +169,7 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 		if name != "" && box.Name != name {
 			return adapter.Response{}, adapter.NewError("mailtrap_inbox_unmanaged")
 		}
-		return adapter.Response{Outputs: publicOutputs(box)}, nil
+		return adapter.Response{Outputs: publicOutputs(box, "")}, nil
 	case "destroy":
 		id := r.ExternalID
 		if id == "" && name != "" {
@@ -160,7 +198,137 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 	}
 }
 
-func publicOutputs(box *inbox) map[string]string {
+// handleShared keeps one sandbox for the Mailtrap project. The sandbox is not
+// owned by any single environment: destroy never deletes it or clears messages.
+//
+// Engine interaction (without engine changes):
+//   - read without external_id returns Absent so a second environment's
+//     read-before-create does not fail with "already exists"; apply does
+//     find-or-create by the shared name.
+//   - read with external_id returns Absent so destroy verification treats the
+//     shared sandbox like a referenced (non-managed) resource and clears local
+//     inventory without requiring a provider delete.
+//   - validate with external_id confirms the shared sandbox is still present.
+func handleShared(ctx context.Context, token, accountID, projectID string, r adapter.Request) (adapter.Response, error) {
+	sandboxName := sharedSandboxName(r.Config)
+	recipient, err := recipientTag(r.Environment, r.Config["recipient_domain"])
+	if err != nil {
+		return adapter.Response{}, err
+	}
+	switch r.Hook {
+	case "read":
+		// Shared sandboxes are not environment-owned. Absence on read lets the
+		// engine attach via apply and detach on destroy without deleting.
+		return adapter.Response{Absent: true}, nil
+	case "validate":
+		if r.ExternalID == "" {
+			found, err := findByName(ctx, token, accountID, projectID, sandboxName)
+			if err != nil {
+				return adapter.Response{}, err
+			}
+			if found == nil {
+				return adapter.Response{Absent: true}, nil
+			}
+			return adapter.Response{ExternalID: strconv.FormatInt(found.ID, 10), Status: "ready"}, nil
+		}
+		box, status, err := getSandbox(ctx, token, accountID, r.ExternalID)
+		if status == http.StatusNotFound {
+			return adapter.Response{Absent: true}, nil
+		}
+		if err != nil {
+			return adapter.Response{}, classify(status, err)
+		}
+		if box.Name != sandboxName {
+			return adapter.Response{}, adapter.NewError("mailtrap_inbox_unmanaged")
+		}
+		return adapter.Response{ExternalID: strconv.FormatInt(box.ID, 10), Status: "ready"}, nil
+	case "apply":
+		if existing, err := findByName(ctx, token, accountID, projectID, sandboxName); err != nil {
+			return adapter.Response{}, err
+		} else if existing != nil {
+			return adapter.Response{
+				ExternalID: strconv.FormatInt(existing.ID, 10),
+				Status:     "ready",
+				Outputs:    publicOutputs(existing, recipient),
+			}, nil
+		}
+		box, status, err := createSandbox(ctx, token, projectID, sandboxName)
+		if err != nil {
+			return adapter.Response{}, classify(status, err)
+		}
+		out := publicOutputs(box, recipient)
+		out["MAILTRAP_SMTP_PASS"] = box.Password
+		return adapter.Response{
+			ExternalID: strconv.FormatInt(box.ID, 10),
+			Status:     "created",
+			Outputs:    out,
+		}, nil
+	case "outputs":
+		if r.ExternalID == "" {
+			return adapter.Response{}, adapter.NewError("mailtrap_inbox_missing")
+		}
+		box, status, err := getSandbox(ctx, token, accountID, r.ExternalID)
+		if err != nil {
+			return adapter.Response{}, classify(status, err)
+		}
+		if box.Name != sandboxName {
+			return adapter.Response{}, adapter.NewError("mailtrap_inbox_unmanaged")
+		}
+		return adapter.Response{Outputs: publicOutputs(box, recipient)}, nil
+	case "destroy":
+		// Referenced semantics: detach only. Never delete the shared sandbox
+		// or clear its messages; operators delete it manually if needed.
+		return adapter.Response{Absent: true}, nil
+	default:
+		return adapter.Response{}, adapter.NewError("mailtrap_invalid_request")
+	}
+}
+
+func sharedSandboxName(cfg map[string]string) string {
+	if name := strings.TrimSpace(cfg["shared_sandbox_name"]); name != "" {
+		return name
+	}
+	return defaultSharedName
+}
+
+func recipientTag(environment, domain string) (string, error) {
+	domain = strings.TrimSpace(domain)
+	if domain == "" || !recipientDomainPat.MatchString(domain) {
+		return "", adapter.NewError("mailtrap_recipient_domain_required")
+	}
+	local := recipientLocalPart(environment)
+	if local == "" {
+		return "", adapter.NewError("mailtrap_recipient_domain_required")
+	}
+	return local + "@" + strings.ToLower(domain), nil
+}
+
+func recipientLocalPart(environment string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(environment)) {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(r)
+			lastDash = false
+		case r == '.' || r == '_' || r == '-':
+			if b.Len() == 0 || lastDash {
+				continue
+			}
+			b.WriteByte('-')
+			lastDash = true
+		default:
+			if b.Len() == 0 || lastDash {
+				continue
+			}
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func publicOutputs(box *inbox, recipient string) map[string]string {
 	port := "2525"
 	for _, p := range box.SMTPPorts {
 		if p == 2525 || p == 587 || p == 25 || p == 465 {
@@ -171,12 +339,16 @@ func publicOutputs(box *inbox) map[string]string {
 	if len(box.SMTPPorts) > 0 && port == "2525" {
 		port = strconv.Itoa(box.SMTPPorts[0])
 	}
-	return map[string]string{
+	out := map[string]string{
 		"MAILTRAP_INBOX_ID":  strconv.FormatInt(box.ID, 10),
 		"MAILTRAP_SMTP_HOST": "sandbox.smtp.mailtrap.io",
 		"MAILTRAP_SMTP_PORT": port,
 		"MAILTRAP_SMTP_USER": box.Username,
 	}
+	if recipient != "" {
+		out[recipientTagOutput] = recipient
+	}
+	return out
 }
 
 func findByName(ctx context.Context, token, accountID, projectID, name string) (*inbox, error) {

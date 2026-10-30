@@ -9,6 +9,11 @@ components:
     config:
       account_id: "REPLACE_ACCOUNT_ID"
       project_id: "REPLACE_PROJECT_ID"
+      # Dedicated (default): one sandbox per environment.
+      # Shared: one sandbox for the project; isolate via MAILTRAP_RECIPIENT_TAG.
+      # mode: shared
+      # recipient_domain: mail.example.test
+      # shared_sandbox_name: envtie-shared
 bindings:
   - from: mail.MAILTRAP_SMTP_HOST
     to: dotenv.MAILTRAP_SMTP_HOST
@@ -20,6 +25,8 @@ bindings:
     to: dotenv.MAILTRAP_SMTP_PASS
   - from: mail.MAILTRAP_INBOX_ID
     to: dotenv.MAILTRAP_INBOX_ID
+  # - from: mail.MAILTRAP_RECIPIENT_TAG
+  #   to: dotenv.MAILTRAP_RECIPIENT_TAG
 policy:
   expires_in: 1d
   protect: false
