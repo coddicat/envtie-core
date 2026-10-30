@@ -413,8 +413,12 @@ func runAutomationOperation(id string) error {
 	if !secureAPIURL(base) || token == "" {
 		return errors.New("HTTPS ENVTIE_API_URL and ENVTIE_API_KEY are required")
 	}
+	pub, err := base64.StdEncoding.DecodeString(strings.TrimSpace(envx.Get("PUBLIC_KEY")))
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return errors.New("ENVTIE_PUBLIC_KEY must be base64 Ed25519 public key")
+	}
 	cfg := runnerConfig{
-		base: base, token: token, client: &http.Client{Timeout: 30 * time.Second},
+		base: base, token: token, pub: ed25519.PublicKey(pub), client: &http.Client{Timeout: 30 * time.Second},
 		jobsRoot: "/v1/custom-ci/operations", exactOperation: id,
 	}
 	job, err := cfg.lease(ctx)
@@ -957,6 +961,9 @@ func (e *leaseStatusError) Error() string {
 
 func (cfg *runnerConfig) lease(ctx context.Context) (runnerJob, error) {
 	var job runnerJob
+	if len(cfg.pub) == 0 {
+		return job, errors.New("signing public key not configured")
+	}
 	path := cfg.jobsRootPath()
 	if cfg.exactOperation != "" {
 		path += "/" + url.PathEscape(cfg.exactOperation) + "/lease"
@@ -983,13 +990,6 @@ func (cfg *runnerConfig) lease(ctx context.Context) (runnerJob, error) {
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
 		return job, errors.New("invalid job payload")
-	}
-	if len(cfg.pub) == 0 && payload.PublicKey != "" {
-		raw, err := base64.StdEncoding.DecodeString(payload.PublicKey)
-		if err != nil || len(raw) != ed25519.PublicKeySize {
-			return job, errors.New("control plane signing key rejected")
-		}
-		cfg.pub = raw
 	}
 	return payload.runnerJob, nil
 }
