@@ -4,6 +4,20 @@ All notable changes to EnvTie Core are documented here.
 
 ## Unreleased
 
+## [1.8.0-beta.1] - 2026-10-29
+
+- `vercel@1`: add Blob stores via `product: blob` (default remains Hosting). Creates one
+  store per environment (`access`, optional `region` / `team_id`); outputs
+  `BLOB_STORE_ID` and `BLOB_READ_WRITE_TOKEN` from the storage secrets API. Existing
+  Hosting blueprints without `product` keep working.
+- `upstash@1`: add Vector indexes via `product: vector` (default remains Redis). Vector
+  config uses `region`, `similarity_function`, `dimension_count`, and optional
+  `index_type` / embedding models; outputs `UPSTASH_VECTOR_REST_URL` and
+  `UPSTASH_VECTOR_REST_TOKEN`. Existing Redis blueprints without `product` keep working.
+- Official `resend@1` adapter: create/delete one domain-scoped Resend sending
+  API key per environment (`sending_access` + `domain_id`). Outputs
+  `RESEND_API_KEY` (create-only), `RESEND_API_KEY_ID`, and optional `RESEND_FROM`.
+  Credential is a management `RESEND_API_KEY` with permission to manage keys.
 - `mailtrap@1`: create via `POST /api/projects/{id}/sandboxes` with
   `{"sandbox":{"name":"..."}}` (current Mailtrap Email Sandbox API). Plan or
   permission denials map to `mailtrap_quota_exceeded` instead of a vague

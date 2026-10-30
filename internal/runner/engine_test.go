@@ -37,6 +37,20 @@ func TestInjectVercelEnvBindingsSkipsCreationOnlyOnReplan(t *testing.T) {
 			t.Fatalf("must not override explicit git_branch: %#v", cfg)
 		}
 	})
+	t.Run("isVercelHosting", func(t *testing.T) {
+		if !isVercelHosting(core.Component{Adapter: "vercel@1", Config: map[string]string{"project_id": "prj"}}) {
+			t.Fatal("default product should be hosting")
+		}
+		if !isVercelHosting(core.Component{Adapter: "vercel@1", Config: map[string]string{"product": "hosting"}}) {
+			t.Fatal("explicit hosting")
+		}
+		if isVercelHosting(core.Component{Adapter: "vercel@1", Config: map[string]string{"product": "blob", "access": "private"}}) {
+			t.Fatal("blob must not be treated as hosting")
+		}
+		if isVercelHosting(core.Component{Adapter: "resend@1"}) {
+			t.Fatal("non-vercel adapter")
+		}
+	})
 
 	if err := injectVercelEnvBindings(cfg, bindings, outputs, creationOnly, true, map[string]bool{}, nil); err != nil {
 		t.Fatal(err)

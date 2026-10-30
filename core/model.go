@@ -182,14 +182,14 @@ func githubBindingsWithoutProvider(b Blueprint) bool {
 }
 
 func vercelBindingsWithoutProvider(b Blueprint) bool {
-	hasProvider := false
+	hasHosting := false
 	for _, c := range b.Components {
-		if c.Adapter == "vercel@1" {
-			hasProvider = true
+		if isVercelHosting(c) {
+			hasHosting = true
 			break
 		}
 	}
-	if hasProvider {
+	if hasHosting {
 		return false
 	}
 	for _, binding := range b.Bindings {
@@ -198,6 +198,20 @@ func vercelBindingsWithoutProvider(b Blueprint) bool {
 		}
 	}
 	return false
+}
+
+// isVercelHosting reports the Hosting product (default). Blob stores share
+// vercel@1 but do not accept vercel.env.* or trigger preview deploys.
+func isVercelHosting(c Component) bool {
+	if c.Adapter != "vercel@1" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Config["product"])) {
+	case "", "hosting":
+		return true
+	default:
+		return false
+	}
 }
 
 // vercelEnvSourcesOrdered ensures each vercel.env.* source is ordered relative
@@ -232,7 +246,7 @@ func vercelEnvSourcesOrdered(b Blueprint, seen map[string]Component) error {
 		source := strings.SplitN(binding.From, ".", 2)[0]
 		ok := false
 		for _, c := range b.Components {
-			if c.Adapter != "vercel@1" {
+			if !isVercelHosting(c) {
 				continue
 			}
 			if reachable[c.ID][source] || reachable[source][c.ID] {
@@ -241,7 +255,7 @@ func vercelEnvSourcesOrdered(b Blueprint, seen map[string]Component) error {
 			}
 		}
 		if !ok {
-			return fmt.Errorf("vercel env binding %q requires an order between vercel@1 and %q", binding.To, source)
+			return fmt.Errorf("vercel env binding %q requires an order between vercel@1 Hosting and %q", binding.To, source)
 		}
 	}
 	return nil
@@ -294,7 +308,7 @@ func (b Blueprint) Validate() error {
 		if !adapterName.MatchString(c.Adapter) {
 			return fmt.Errorf("adapter %q must be pinned to a major version", c.Adapter)
 		}
-		official := c.Adapter == "neon@1" || c.Adapter == "upstash@1" || c.Adapter == "stripe@1" || c.Adapter == "github@1" || c.Adapter == "sentry@1" || c.Adapter == "mailtrap@1" || c.Adapter == "vercel@1"
+		official := c.Adapter == "neon@1" || c.Adapter == "upstash@1" || c.Adapter == "stripe@1" || c.Adapter == "github@1" || c.Adapter == "sentry@1" || c.Adapter == "mailtrap@1" || c.Adapter == "vercel@1" || c.Adapter == "resend@1"
 		if official && c.Source != nil {
 			return fmt.Errorf("%s: official adapters cannot override their source", c.ID)
 		}
@@ -365,7 +379,7 @@ func (b Blueprint) Validate() error {
 		return errors.New("GitHub environment bindings require a github@1 component")
 	}
 	if vercelBindingsWithoutProvider(b) {
-		return errors.New("Vercel env bindings require a vercel@1 component")
+		return errors.New("Vercel env bindings require a vercel@1 Hosting component (product: hosting)")
 	}
 	if err := vercelEnvSourcesOrdered(b, seen); err != nil {
 		return err

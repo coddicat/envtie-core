@@ -24,24 +24,24 @@ func TestCanonicalBlueprints(t *testing.T) {
 			name: "neon-upstash-local.yaml",
 			bindings: []Binding{
 				{From: "postgres.DATABASE_URL", To: "dotenv.DATABASE_URL"},
-				{From: "cache.UPSTASH_REDIS_REST_URL", To: "dotenv.UPSTASH_REDIS_REST_URL"},
-				{From: "cache.UPSTASH_REDIS_REST_TOKEN", To: "dotenv.UPSTASH_REDIS_REST_TOKEN"},
+				{From: "redis.UPSTASH_REDIS_REST_URL", To: "dotenv.UPSTASH_REDIS_REST_URL"},
+				{From: "redis.UPSTASH_REDIS_REST_TOKEN", To: "dotenv.UPSTASH_REDIS_REST_TOKEN"},
 			},
 		},
 		{
 			name: "neon-upstash-windows.yaml",
 			bindings: []Binding{
 				{From: "postgres.DATABASE_URL", To: "dotenv.DATABASE_URL"},
-				{From: "cache.UPSTASH_REDIS_REST_URL", To: "dotenv.UPSTASH_REDIS_REST_URL"},
-				{From: "cache.UPSTASH_REDIS_REST_TOKEN", To: "dotenv.UPSTASH_REDIS_REST_TOKEN"},
+				{From: "redis.UPSTASH_REDIS_REST_URL", To: "dotenv.UPSTASH_REDIS_REST_URL"},
+				{From: "redis.UPSTASH_REDIS_REST_TOKEN", To: "dotenv.UPSTASH_REDIS_REST_TOKEN"},
 			},
 		},
 		{
 			name: "neon-upstash-ci.yaml",
 			bindings: []Binding{
 				{From: "postgres.DATABASE_URL", To: "github.environment.secret.DATABASE_URL"},
-				{From: "cache.UPSTASH_REDIS_REST_URL", To: "github.environment.variable.UPSTASH_REDIS_REST_URL"},
-				{From: "cache.UPSTASH_REDIS_REST_TOKEN", To: "github.environment.secret.UPSTASH_REDIS_REST_TOKEN"},
+				{From: "redis.UPSTASH_REDIS_REST_URL", To: "github.environment.variable.UPSTASH_REDIS_REST_URL"},
+				{From: "redis.UPSTASH_REDIS_REST_TOKEN", To: "github.environment.secret.UPSTASH_REDIS_REST_TOKEN"},
 			},
 		},
 	}

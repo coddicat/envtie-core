@@ -1,0 +1,15 @@
+name: resend-preview
+components:
+  - id: resend
+    adapter: resend@1
+    ownership: managed
+    config:
+      domain_id: "REPLACE_WITH_RESEND_DOMAIN_ID"
+bindings:
+  - from: resend.RESEND_API_KEY
+    to: dotenv.RESEND_API_KEY
+  - from: resend.RESEND_API_KEY_ID
+    to: dotenv.RESEND_API_KEY_ID
+policy:
+  expires_in: 1d
+  protect: false

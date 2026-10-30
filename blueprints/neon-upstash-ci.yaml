@@ -14,7 +14,7 @@ components:
       project_id: REPLACE_WITH_NEON_PROJECT_ID
       database_name: REPLACE_WITH_NEON_DATABASE
       role_name: REPLACE_WITH_NEON_ROLE
-  - id: cache
+  - id: redis
     adapter: upstash@1
     ownership: managed
     depends_on: [postgres]
@@ -25,16 +25,16 @@ components:
   - id: github
     adapter: github@1
     ownership: managed
-    depends_on: [postgres, cache]
+    depends_on: [postgres, redis]
     config:
       repository: owner/name
       deployment: "true"
 bindings:
   - from: postgres.DATABASE_URL
     to: github.environment.secret.DATABASE_URL
-  - from: cache.UPSTASH_REDIS_REST_URL
+  - from: redis.UPSTASH_REDIS_REST_URL
     to: github.environment.variable.UPSTASH_REDIS_REST_URL
-  - from: cache.UPSTASH_REDIS_REST_TOKEN
+  - from: redis.UPSTASH_REDIS_REST_TOKEN
     to: github.environment.secret.UPSTASH_REDIS_REST_TOKEN
 policy:
   expires_in: 1d

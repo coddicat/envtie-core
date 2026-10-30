@@ -114,7 +114,7 @@ func (e Engine) Apply(ctx context.Context, plan core.Plan, env *core.Environment
 		if err := expandConfigRefs(req.Config, outputs); err != nil {
 			return e.fail(env, adapter.WithPlace(c.ID, "config", err))
 		}
-		if c.Adapter == "vercel@1" {
+		if isVercelHosting(c) {
 			injectVercelGitBranch(req.Config)
 			if err := injectVercelEnvBindings(req.Config, plan.Bindings, outputs, creationOnly, previouslyReady, createdNow, pendingLater); err != nil {
 				return e.fail(env, err)
@@ -163,7 +163,7 @@ func (e Engine) Apply(ctx context.Context, plan core.Plan, env *core.Environment
 			if err := e.save(env); err != nil {
 				return err
 			}
-		} else if c.Adapter == "vercel@1" && c.Ownership == core.Managed {
+		} else if isVercelHosting(c) && c.Ownership == core.Managed {
 			// Reconcile branch env vars and trigger a fresh preview deployment on every plan.
 			appendLog(env, "info", c.ID+" apply")
 			resp, err := e.applyWithReconcile(ctx, c, req)
@@ -491,7 +491,7 @@ func (e Engine) Destroy(ctx context.Context, b core.Blueprint, env *core.Environ
 		appendLog(env, "info", c.ID+" destroy")
 		cfg := copyConfig(c.Config)
 		cfg["name"] = managedConfigName(env.Name, c.ID)
-		if c.Adapter == "vercel@1" {
+		if isVercelHosting(c) {
 			injectVercelGitBranch(cfg)
 		}
 		req := adapter.Request{Protocol: adapter.ProtocolVersion, Hook: "destroy", Environment: env.Name, Component: c.ID, Config: cfg, ExternalID: r.ExternalID, IdempotencyKey: env.Name + "/destroy/" + c.ID}
@@ -654,6 +654,20 @@ func expandConfigRefs(cfg map[string]string, outputs map[string]string) error {
 		cfg[key] = expanded
 	}
 	return nil
+}
+
+// isVercelHosting is the Hosting product (default). Blob stores share vercel@1
+// but must not receive vercel.env.* injection or redeploy-on-every-plan.
+func isVercelHosting(c core.Component) bool {
+	if c.Adapter != "vercel@1" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Config["product"])) {
+	case "", "hosting":
+		return true
+	default:
+		return false
+	}
 }
 
 // injectVercelGitBranch sets git_branch from GITHUB_HEAD_REF when the blueprint
