@@ -165,13 +165,13 @@ func TestVectorIndexLifecycle(t *testing.T) {
 	t.Setenv("UPSTASH_EMAIL", "test@example.com")
 	t.Setenv("UPSTASH_API_KEY", "test-key")
 	cfg := map[string]string{
-		"product":              "vector",
-		"name":                 "pr-1-vector",
-		"region":               "us-east-1",
-		"similarity_function":  "COSINE",
-		"dimension_count":      "1536",
-		"index_type":           "DENSE",
-		"email":                "test@example.com",
+		"product":             "vector",
+		"name":                "pr-1-vector",
+		"region":              "us-east-1",
+		"similarity_function": "COSINE",
+		"dimension_count":     "1536",
+		"index_type":          "DENSE",
+		"email":               "test@example.com",
 	}
 	useUpstashTransport(t, func(r *http.Request) (*http.Response, error) {
 		if !strings.HasPrefix(r.Header.Get("Authorization"), "Basic ") {

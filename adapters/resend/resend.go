@@ -15,10 +15,10 @@ import (
 )
 
 var (
-	apiBase      = "https://api.resend.com"
-	domainIDPat  = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-	fromAddrPat  = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
-	maxKeyName   = 50
+	apiBase     = "https://api.resend.com"
+	domainIDPat = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	fromAddrPat = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+	maxKeyName  = 50
 )
 
 // Handler implements the EnvTie adapter protocol for Resend API keys.
