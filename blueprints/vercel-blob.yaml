@@ -1,0 +1,17 @@
+name: blob-preview
+components:
+  - id: blob
+    adapter: vercel@1
+    ownership: managed
+    config:
+      product: blob
+      access: private
+      region: iad1
+bindings:
+  - from: blob.BLOB_STORE_ID
+    to: dotenv.BLOB_STORE_ID
+  - from: blob.BLOB_READ_WRITE_TOKEN
+    to: dotenv.BLOB_READ_WRITE_TOKEN
+policy:
+  expires_in: 1d
+  protect: false

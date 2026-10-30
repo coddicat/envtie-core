@@ -161,6 +161,124 @@ func TestDefaultCreateShape(t *testing.T) {
 	}
 }
 
+func TestVectorIndexLifecycle(t *testing.T) {
+	t.Setenv("UPSTASH_EMAIL", "test@example.com")
+	t.Setenv("UPSTASH_API_KEY", "test-key")
+	cfg := map[string]string{
+		"product":             "vector",
+		"name":                "pr-1-vector",
+		"region":              "us-east-1",
+		"similarity_function": "COSINE",
+		"dimension_count":     "1536",
+		"index_type":          "DENSE",
+		"email":               "test@example.com",
+	}
+	useUpstashTransport(t, func(r *http.Request) (*http.Response, error) {
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "Basic ") {
+			t.Fatal("missing Upstash auth")
+		}
+		status, body := 200, "{}"
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/v2/vector/index":
+			body = `[]`
+		case r.Method == "POST" && r.URL.Path == "/v2/vector/index":
+			assertVectorCreateBody(t, r, "pr-1-vector", "us-east-1", "COSINE", 1536, "DENSE")
+			body = `{"id":"idx-1","name":"pr-1-vector","endpoint":"glowing-baboon-15797-us1","token":"vector-secret"}`
+		case r.Method == "GET" && r.URL.Path == "/v2/vector/index/idx-1":
+			body = `{"id":"idx-1","name":"pr-1-vector","endpoint":"glowing-baboon-15797-us1","token":"vector-secret"}`
+		case r.Method == "DELETE" && r.URL.Path == "/v2/vector/index/idx-1":
+			body = `"OK"`
+		default:
+			t.Fatalf("unexpected Upstash request: %s %s", r.Method, r.URL)
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})
+	h := Handler{}
+	base := adapter.Request{Config: cfg}
+	base.Hook = "read"
+	read, err := h.Handle(context.Background(), base)
+	if err != nil || !read.Absent {
+		t.Fatalf("read: %+v %v", read, err)
+	}
+	base.Hook = "apply"
+	created, err := h.Handle(context.Background(), base)
+	if err != nil || created.ExternalID != "idx-1" {
+		t.Fatalf("apply: %+v %v", created, err)
+	}
+	base.ExternalID = created.ExternalID
+	base.Hook = "outputs"
+	out, err := h.Handle(context.Background(), base)
+	if err != nil ||
+		out.Outputs["UPSTASH_VECTOR_REST_URL"] != "https://glowing-baboon-15797-us1.upstash.io" ||
+		out.Outputs["UPSTASH_VECTOR_REST_TOKEN"] != "vector-secret" ||
+		out.Outputs["REDIS_URL"] != "" {
+		t.Fatalf("outputs: %+v %v", out, err)
+	}
+	base.Hook = "destroy"
+	gone, err := h.Handle(context.Background(), base)
+	if err != nil || !gone.Absent {
+		t.Fatalf("destroy: %+v %v", gone, err)
+	}
+}
+
+func TestVectorConfigValidation(t *testing.T) {
+	t.Setenv("UPSTASH_EMAIL", "person@example.com")
+	t.Setenv("UPSTASH_API_KEY", "upstash-fixture-key")
+	cases := []struct {
+		name   string
+		config map[string]string
+		want   string
+	}{
+		{
+			name:   "bad product",
+			config: map[string]string{"product": "qstash", "name": "x"},
+			want:   "upstash_product_invalid",
+		},
+		{
+			name:   "missing dimension",
+			config: map[string]string{"product": "vector", "name": "x", "region": "us-east-1"},
+			want:   "upstash_dimension_required",
+		},
+		{
+			name:   "bad similarity",
+			config: map[string]string{"product": "vector", "name": "x", "dimension_count": "8", "similarity_function": "L2"},
+			want:   "upstash_similarity_invalid",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Handler{}.Handle(context.Background(), adapter.Request{Hook: "apply", Config: tc.config})
+			var coded *adapter.CodedError
+			if !errors.As(err, &coded) || coded.Code != tc.want {
+				t.Fatalf("got %v, want %s", err, tc.want)
+			}
+		})
+	}
+}
+
+func assertVectorCreateBody(t *testing.T, r *http.Request, name, region, similarity string, dim int, indexType string) {
+	t.Helper()
+	var posted struct {
+		Name               string `json:"name"`
+		Region             string `json:"region"`
+		SimilarityFunction string `json:"similarity_function"`
+		DimensionCount     int    `json:"dimension_count"`
+		IndexType          string `json:"index_type"`
+		Type               string `json:"type"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&posted); err != nil ||
+		posted.Name != name ||
+		posted.Region != region ||
+		posted.SimilarityFunction != similarity ||
+		posted.DimensionCount != dim ||
+		posted.IndexType != indexType ||
+		posted.Type != "payg" {
+		t.Fatalf("vector create body: %+v %v", posted, err)
+	}
+}
+
 func assertLiveCreateBody(t *testing.T, r *http.Request, name, platform, region string) {
 	t.Helper()
 	var posted struct {

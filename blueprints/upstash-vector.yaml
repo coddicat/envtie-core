@@ -1,0 +1,20 @@
+name: vector-preview
+components:
+  - id: vector
+    adapter: upstash@1
+    ownership: managed
+    config:
+      product: vector
+      email: REPLACE_WITH_UPSTASH_EMAIL
+      region: us-east-1
+      similarity_function: COSINE
+      dimension_count: "1536"
+      index_type: DENSE
+bindings:
+  - from: vector.UPSTASH_VECTOR_REST_URL
+    to: dotenv.UPSTASH_VECTOR_REST_URL
+  - from: vector.UPSTASH_VECTOR_REST_TOKEN
+    to: dotenv.UPSTASH_VECTOR_REST_TOKEN
+policy:
+  expires_in: 1d
+  protect: false

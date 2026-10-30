@@ -88,8 +88,16 @@ func TestVercelEnvBindingsRequireTheVercelProvider(t *testing.T) {
 	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "vercel@1") {
 		t.Fatal(err)
 	}
+	// Blob alone does not satisfy vercel.env.* — Hosting is required.
 	b.Components = append(b.Components, Component{
-		ID: "host", Adapter: "vercel@1", Ownership: Managed, DependsOn: []string{"db"},
+		ID: "blob", Adapter: "vercel@1", Ownership: Managed,
+		Config: map[string]string{"product": "blob", "access": "private"},
+	})
+	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "Hosting") {
+		t.Fatal(err)
+	}
+	b.Components = append(b.Components, Component{
+		ID: "host", Adapter: "vercel@1", Ownership: Managed, DependsOn: []string{"db", "blob"},
 		Config: map[string]string{"project_id": "prj_app"},
 	})
 	b.Bindings = append(b.Bindings, Binding{From: "host.VERCEL_URL", To: "dotenv.VERCEL_URL"})

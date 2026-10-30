@@ -4,7 +4,7 @@
 
 Public customer-side components and contracts for [EnvTie.dev](https://envtie.dev):
 
-> Public beta: pin `v1.7.0-beta.5` explicitly. Prerelease interfaces may change
+> Public beta: pin `v1.8.0-beta.1` explicitly. Prerelease interfaces may change
 > before general availability.
 
 - `envtie` CLI and workspace runner
@@ -31,7 +31,7 @@ Or run a long-lived workspace runner:
 docker run --rm \
   -e ENVTIE_API_URL=https://envtie.dev \
   -e ENVTIE_RUNNER_TOKEN \
-  ghcr.io/coddicat/envtie-runner:1.7.0-beta.5
+  ghcr.io/coddicat/envtie-runner:1.8.0-beta.1
 ```
 
 Runner tokens and provider credentials should be supplied by a secret manager.
@@ -43,7 +43,7 @@ Canonical templates are in [`blueprints/`](blueprints/), and the JSON Schema is
 [`schemas/blueprint.schema.json`](schemas/blueprint.schema.json). Start with a
 template and replace only its explicit placeholders.
 
-Official adapters include Neon, Upstash, Stripe, GitHub, Sentry, Mailtrap, and
+Official adapters include Neon, Upstash, Stripe, GitHub, Sentry, Mailtrap, Resend, and
 Vercel (`vercel@1` — branch preview deploy + env vars on an existing project).
 Stripe (`stripe@1`) registers one webhook per environment; `host` is a public
 hostname or URL. Pair with Vercel via `host: "{host.VERCEL_URL}"` and

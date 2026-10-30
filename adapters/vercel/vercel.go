@@ -84,6 +84,8 @@ func (Handler) Manifest() adapter.Manifest {
 			{Name: "VERCEL_URL", Sensitivity: "PUBLIC"},
 			{Name: "VERCEL_DEPLOYMENT_ID", Sensitivity: "PUBLIC"},
 			{Name: "VERCEL_GIT_BRANCH", Sensitivity: "PUBLIC"},
+			{Name: "BLOB_STORE_ID", Sensitivity: "PUBLIC"},
+			{Name: "BLOB_READ_WRITE_TOKEN", Sensitivity: "SECRET"},
 		},
 	}
 }
@@ -94,6 +96,28 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 		return adapter.Response{}, adapter.NewError("vercel_credential_missing")
 	}
 	auth := "Bearer " + token
+	switch product(r.Config) {
+	case "blob":
+		return handleBlob(ctx, r, auth)
+	case "hosting":
+		return handleHosting(ctx, r, auth)
+	default:
+		return adapter.Response{}, adapter.NewError("vercel_product_invalid")
+	}
+}
+
+func product(cfg map[string]string) string {
+	switch strings.ToLower(strings.TrimSpace(cfg["product"])) {
+	case "", "hosting":
+		return "hosting"
+	case "blob":
+		return "blob"
+	default:
+		return ""
+	}
+}
+
+func handleHosting(ctx context.Context, r adapter.Request, auth string) (adapter.Response, error) {
 	projectID := strings.TrimSpace(r.Config["project_id"])
 	if !projectIDPat.MatchString(projectID) {
 		return adapter.Response{}, adapter.NewError("vercel_project_required")

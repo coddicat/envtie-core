@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/coddicat/envtie-core/adapters/httpclient"
@@ -21,7 +22,13 @@ func (Handler) Manifest() adapter.Manifest {
 			{Name: "UPSTASH_EMAIL", Kind: adapter.InputVariable, Required: true, Description: "Upstash account email. Prefer config email; this variable is only a fallback."},
 			{Name: "UPSTASH_API_KEY", Kind: adapter.InputSecret, Required: true, Description: "Upstash API key"},
 		},
-		Outputs: []adapter.Field{{Name: "REDIS_URL", Sensitivity: "SECRET"}, {Name: "UPSTASH_REDIS_REST_URL", Sensitivity: "PUBLIC"}, {Name: "UPSTASH_REDIS_REST_TOKEN", Sensitivity: "SECRET"}},
+		Outputs: []adapter.Field{
+			{Name: "REDIS_URL", Sensitivity: "SECRET"},
+			{Name: "UPSTASH_REDIS_REST_URL", Sensitivity: "PUBLIC"},
+			{Name: "UPSTASH_REDIS_REST_TOKEN", Sensitivity: "SECRET"},
+			{Name: "UPSTASH_VECTOR_REST_URL", Sensitivity: "PUBLIC"},
+			{Name: "UPSTASH_VECTOR_REST_TOKEN", Sensitivity: "SECRET"},
+		},
 	}
 }
 
@@ -34,6 +41,15 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 	}
 	email, key := accountEmail(r), os.Getenv("UPSTASH_API_KEY")
 	auth := "Basic " + basic(email, key)
+	switch product(r.Config) {
+	case "vector":
+		return handleVector(ctx, r, auth)
+	default:
+		return handleRedis(ctx, r, auth)
+	}
+}
+
+func handleRedis(ctx context.Context, r adapter.Request, auth string) (adapter.Response, error) {
 	base := "https://api.upstash.com/v2/redis"
 	switch r.Hook {
 	case "read":
@@ -85,7 +101,7 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 		}
 		return adapter.Response{ExternalID: x.ID, Status: "created"}, nil
 	case "validate":
-		return (Handler{}).Handle(ctx, adapter.Request{Hook: "read", Config: r.Config, ExternalID: r.ExternalID})
+		return handleRedis(ctx, adapter.Request{Hook: "read", Config: r.Config, ExternalID: r.ExternalID}, auth)
 	case "outputs":
 		var x struct {
 			Endpoint  string `json:"endpoint"`
@@ -127,6 +143,160 @@ func (Handler) Handle(ctx context.Context, r adapter.Request) (adapter.Response,
 	return adapter.Response{}, adapter.NewError("upstash_invalid_request")
 }
 
+func handleVector(ctx context.Context, r adapter.Request, auth string) (adapter.Response, error) {
+	base := "https://api.upstash.com/v2/vector/index"
+	switch r.Hook {
+	case "read":
+		if r.ExternalID != "" {
+			var x struct {
+				ID string `json:"id"`
+			}
+			status, err := httpclient.JSON(ctx, "GET", base+"/"+url.PathEscape(r.ExternalID), auth, nil, &x)
+			if status == 404 {
+				return adapter.Response{Absent: true}, nil
+			}
+			if err != nil {
+				return adapter.Response{}, classify(status, "read", err)
+			}
+			return adapter.Response{ExternalID: x.ID, Status: "ready"}, nil
+		}
+		var xs []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		status, err := httpclient.JSON(ctx, "GET", base, auth, nil, &xs)
+		if err != nil {
+			return adapter.Response{}, classify(status, "read", err)
+		}
+		for _, x := range xs {
+			if x.Name == r.Config["name"] {
+				return adapter.Response{ExternalID: x.ID, Status: "ready"}, nil
+			}
+		}
+		return adapter.Response{Absent: true}, nil
+	case "apply":
+		body, err := vectorCreateBody(r.Config)
+		if err != nil {
+			return adapter.Response{}, err
+		}
+		var x struct {
+			ID string `json:"id"`
+		}
+		status, err := httpclient.JSON(ctx, "POST", base, auth, body, &x)
+		if err != nil {
+			return adapter.Response{}, classify(status, "apply", err)
+		}
+		if x.ID == "" {
+			return adapter.Response{}, adapter.NewError("upstash_unavailable")
+		}
+		return adapter.Response{ExternalID: x.ID, Status: "created"}, nil
+	case "validate":
+		return handleVector(ctx, adapter.Request{Hook: "read", Config: r.Config, ExternalID: r.ExternalID}, auth)
+	case "outputs":
+		var x struct {
+			Endpoint string `json:"endpoint"`
+			Token    string `json:"token"`
+		}
+		status, err := httpclient.JSON(ctx, "GET", base+"/"+url.PathEscape(r.ExternalID), auth, nil, &x)
+		if err != nil {
+			return adapter.Response{}, classify(status, "outputs", err)
+		}
+		if x.Endpoint == "" || x.Token == "" {
+			return adapter.Response{}, adapter.NewError("upstash_outputs_unavailable")
+		}
+		host := x.Endpoint
+		if strings.HasPrefix(host, "https://") || strings.HasPrefix(host, "http://") {
+			return adapter.Response{Outputs: map[string]string{
+				"UPSTASH_VECTOR_REST_URL":   strings.TrimRight(host, "/"),
+				"UPSTASH_VECTOR_REST_TOKEN": x.Token,
+			}}, nil
+		}
+		if !strings.Contains(host, ".") {
+			host += ".upstash.io"
+		}
+		return adapter.Response{Outputs: map[string]string{
+			"UPSTASH_VECTOR_REST_URL":   "https://" + host,
+			"UPSTASH_VECTOR_REST_TOKEN": x.Token,
+		}}, nil
+	case "destroy":
+		status, err := httpclient.JSON(ctx, "DELETE", base+"/"+url.PathEscape(r.ExternalID), auth, nil, nil)
+		if status == 404 {
+			return adapter.Response{Absent: true}, nil
+		}
+		if err != nil {
+			return adapter.Response{}, classify(status, "destroy", err)
+		}
+		return adapter.Response{Absent: true}, nil
+	}
+	return adapter.Response{}, adapter.NewError("upstash_invalid_request")
+}
+
+func product(cfg map[string]string) string {
+	switch strings.ToLower(strings.TrimSpace(cfg["product"])) {
+	case "", "redis":
+		return "redis"
+	case "vector":
+		return "vector"
+	default:
+		return ""
+	}
+}
+
+func vectorCreateBody(cfg map[string]string) (map[string]any, error) {
+	region := strings.TrimSpace(cfg["region"])
+	if region == "" {
+		region = strings.TrimSpace(cfg["primary_region"])
+	}
+	if region == "" {
+		region = "us-east-1"
+	}
+	similarity := strings.ToUpper(strings.TrimSpace(cfg["similarity_function"]))
+	if similarity == "" {
+		similarity = "COSINE"
+	}
+	switch similarity {
+	case "COSINE", "EUCLIDEAN", "DOT_PRODUCT":
+	default:
+		return nil, adapter.NewError("upstash_similarity_invalid")
+	}
+	dimRaw := strings.TrimSpace(cfg["dimension_count"])
+	if dimRaw == "" {
+		return nil, adapter.NewError("upstash_dimension_required")
+	}
+	dim, err := strconv.Atoi(dimRaw)
+	if err != nil || dim < 1 || dim > 65536 {
+		return nil, adapter.NewError("upstash_dimension_required")
+	}
+	indexType := strings.ToUpper(strings.TrimSpace(cfg["index_type"]))
+	if indexType == "" {
+		indexType = "DENSE"
+	}
+	switch indexType {
+	case "DENSE", "SPARSE", "HYBRID":
+	default:
+		return nil, adapter.NewError("upstash_invalid_request")
+	}
+	plan := strings.ToLower(strings.TrimSpace(cfg["type"]))
+	if plan == "" {
+		plan = "payg"
+	}
+	body := map[string]any{
+		"name":                cfg["name"],
+		"region":              region,
+		"similarity_function": similarity,
+		"dimension_count":     dim,
+		"index_type":          indexType,
+		"type":                plan,
+	}
+	if model := strings.TrimSpace(cfg["embedding_model"]); model != "" {
+		body["embedding_model"] = model
+	}
+	if model := strings.TrimSpace(cfg["sparse_embedding_model"]); model != "" {
+		body["sparse_embedding_model"] = model
+	}
+	return body, nil
+}
+
 func accountEmail(r adapter.Request) string {
 	if email := strings.TrimSpace(r.Config["email"]); email != "" {
 		return email
@@ -143,10 +313,18 @@ func preflight(r adapter.Request) error {
 	if accountEmail(r) == "" || os.Getenv("UPSTASH_API_KEY") == "" {
 		return adapter.NewError("upstash_credential_missing")
 	}
+	if product(r.Config) == "" {
+		return adapter.NewError("upstash_product_invalid")
+	}
 	switch r.Hook {
 	case "apply":
 		if r.Config["name"] == "" {
 			return adapter.NewError("upstash_name_required")
+		}
+		if product(r.Config) == "vector" {
+			if _, err := vectorCreateBody(r.Config); err != nil {
+				return err
+			}
 		}
 	case "read", "validate":
 		if r.ExternalID == "" && r.Config["name"] == "" {

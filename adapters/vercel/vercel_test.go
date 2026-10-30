@@ -320,3 +320,84 @@ func TestApplyUsesActionsBranchAndCommit(t *testing.T) {
 		t.Fatalf("%+v %v", resp, err)
 	}
 }
+
+func TestBlobStoreLifecycle(t *testing.T) {
+	t.Setenv("VERCEL_TOKEN", "vt_fixture")
+	clearActionsContext(t)
+	cfg := map[string]string{
+		"product": "blob",
+		"name":    "pr-7-blob",
+		"access":  "private",
+		"region":  "iad1",
+		"team_id": "team_1",
+	}
+	created := false
+	withAPI(t, func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "Bearer vt_fixture" {
+			t.Fatalf("auth %s", r.Header.Get("Authorization"))
+		}
+		if r.URL.Query().Get("teamId") != "team_1" {
+			t.Fatalf("teamId %s", r.URL.RawQuery)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/storage/stores":
+			if !created {
+				return jsonResp(200, `{"stores":[]}`), nil
+			}
+			return jsonResp(200, `{"stores":[{"id":"store_1","name":"pr-7-blob","type":"blob","access":"private","region":"iad1"}]}`), nil
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/storage/stores/blob":
+			var body map[string]any
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &body)
+			if body["name"] != "pr-7-blob" || body["access"] != "private" || body["region"] != "iad1" {
+				t.Fatalf("create body %s", raw)
+			}
+			created = true
+			return jsonResp(200, `{"store":{"id":"store_1","name":"pr-7-blob","type":"blob","access":"private","region":"iad1"}}`), nil
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/storage/stores/store_1":
+			return jsonResp(200, `{"store":{"id":"store_1","name":"pr-7-blob","type":"blob"}}`), nil
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/storage/stores/store_1/secrets":
+			return jsonResp(200, `{"rwToken":"vercel_blob_rw_secret"}`), nil
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/storage/stores/blob/store_1":
+			created = false
+			return jsonResp(200, `{"id":"store_1"}`), nil
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.String())
+			return jsonResp(404, `{}`), nil
+		}
+	})
+	h := Handler{}
+	resp, err := h.Handle(context.Background(), adapter.Request{Hook: "apply", Environment: "pr-7", Component: "blob", Config: cfg})
+	if err != nil || resp.ExternalID != "store_1" || resp.Outputs["BLOB_READ_WRITE_TOKEN"] != "vercel_blob_rw_secret" || resp.Outputs["BLOB_STORE_ID"] != "store_1" {
+		t.Fatalf("apply %+v %v", resp, err)
+	}
+	resp, err = h.Handle(context.Background(), adapter.Request{Hook: "read", Environment: "pr-7", Component: "blob", Config: cfg, ExternalID: "store_1"})
+	if err != nil || resp.Absent || resp.ExternalID != "store_1" {
+		t.Fatalf("read %+v %v", resp, err)
+	}
+	resp, err = h.Handle(context.Background(), adapter.Request{Hook: "outputs", Environment: "pr-7", Component: "blob", Config: cfg, ExternalID: "store_1"})
+	if err != nil || resp.Outputs["BLOB_READ_WRITE_TOKEN"] != "vercel_blob_rw_secret" {
+		t.Fatalf("outputs %+v %v", resp, err)
+	}
+	resp, err = h.Handle(context.Background(), adapter.Request{Hook: "destroy", Environment: "pr-7", Component: "blob", Config: cfg, ExternalID: "store_1"})
+	if err != nil || !resp.Absent {
+		t.Fatalf("destroy %+v %v", resp, err)
+	}
+}
+
+func TestBlobConfigValidation(t *testing.T) {
+	t.Setenv("VERCEL_TOKEN", "vt")
+	clearActionsContext(t)
+	_, err := Handler{}.Handle(context.Background(), adapter.Request{
+		Hook: "apply", Config: map[string]string{"product": "kv", "name": "x"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "vercel_product_invalid") {
+		t.Fatalf("%v", err)
+	}
+	_, err = Handler{}.Handle(context.Background(), adapter.Request{
+		Hook: "apply", Config: map[string]string{"product": "blob", "name": "x", "access": "shared"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "vercel_blob_access_invalid") {
+		t.Fatalf("%v", err)
+	}
+}
