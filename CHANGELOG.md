@@ -4,6 +4,14 @@ All notable changes to EnvTie Core are documented here.
 
 ## Unreleased
 
+## [1.8.0-beta.3] - 2026-10-30
+
+- `mailtrap@1`: optional `mode: shared` keeps one Email Sandbox per Mailtrap
+  project (`shared_sandbox_name` or `envtie-shared`), requires
+  `recipient_domain`, and emits `MAILTRAP_RECIPIENT_TAG` for address-level
+  isolation. Destroy does not delete the shared sandbox. Default `dedicated`
+  (or omitted `mode`) is unchanged. Invalid `mode` → `mailtrap_mode_invalid`.
+
 ## [1.8.0-beta.2] - 2026-10-30
 
 - Runner lease no longer adopts a signing public key from the job payload. Plans
