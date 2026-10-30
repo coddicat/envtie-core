@@ -4,6 +4,13 @@ All notable changes to EnvTie Core are documented here.
 
 ## Unreleased
 
+## [1.8.0-beta.2] - 2026-10-30
+
+- Runner lease no longer adopts a signing public key from the job payload. Plans
+  verify only against the operator-configured `ENVTIE_PUBLIC_KEY`. An empty
+  configured key fails lease with `signing public key not configured` and does
+  not execute. Custom CI `--run` also requires `ENVTIE_PUBLIC_KEY`.
+
 ## [1.8.0-beta.1] - 2026-10-29
 
 - `vercel@1`: add Blob stores via `product: blob` (default remains Hosting). Creates one

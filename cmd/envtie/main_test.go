@@ -428,6 +428,10 @@ func TestPreviewCommandsUseCustomCI(t *testing.T) {
 
 func TestPreviewApplyRunLeasesCustomCIOperation(t *testing.T) {
 	const operationID = "11111111-1111-1111-1111-111111111111"
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.Method+" "+r.URL.RequestURI())
@@ -448,7 +452,8 @@ func TestPreviewApplyRunLeasesCustomCIOperation(t *testing.T) {
 	t.Setenv("ENVTIE_API_URL", srv.URL)
 	t.Setenv("ENVTIE_API_KEY", "et_project_key")
 	t.Setenv("ENVTIE_CI_TOKEN", "")
-	err := preview([]string{"apply", "--run", "pr-4"})
+	t.Setenv("ENVTIE_PUBLIC_KEY", base64.StdEncoding.EncodeToString(pub))
+	err = preview([]string{"apply", "--run", "pr-4"})
 	if err == nil || err.Error() != "no job" {
 		t.Fatalf("err=%v", err)
 	}
@@ -496,7 +501,7 @@ func TestCustomCILeaseCheckpointAndReport(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := runnerConfig{
-		base: srv.URL, token: "ci-token", client: srv.Client(),
+		base: srv.URL, token: "ci-token", pub: pub, client: srv.Client(),
 		jobsRoot: "/v1/custom-ci/operations", exactOperation: operationID,
 		call: func(_ context.Context, _ core.Component, req adapter.Request) (adapter.Response, error) {
 			switch req.Hook {
@@ -541,6 +546,44 @@ func TestCustomCILeaseCheckpointAndReport(t *testing.T) {
 		if strings.Contains(joined, retired) {
 			t.Fatalf("custom CI job used %s\n%s", retired, joined)
 		}
+	}
+}
+
+func TestLeaseRejectsPayloadPublicKeyWithoutConfiguredKey(t *testing.T) {
+	const operationID = "11111111-1111-1111-1111-111111111112"
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := signedJob(t, priv, "pr-payload-key")
+	job.OperationID = operationID
+	var leased bool
+	var executed int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leased = true
+		_ = json.NewEncoder(w).Encode(struct {
+			runnerJob
+			PublicKey string `json:"public_key"`
+		}{runnerJob: job, PublicKey: base64.StdEncoding.EncodeToString(pub)})
+	}))
+	defer srv.Close()
+	cfg := runnerConfig{
+		base: srv.URL, token: "ci-token", client: srv.Client(),
+		jobsRoot: "/v1/custom-ci/operations", exactOperation: operationID,
+		call: func(_ context.Context, _ core.Component, _ adapter.Request) (adapter.Response, error) {
+			executed++
+			return adapter.Response{}, errors.New("must not execute")
+		},
+	}
+	_, err = cfg.lease(context.Background())
+	if err == nil || err.Error() != "signing public key not configured" {
+		t.Fatalf("lease err=%v", err)
+	}
+	if leased {
+		t.Fatal("lease requested control plane without a configured public key")
+	}
+	if executed != 0 {
+		t.Fatalf("adapter executed %d time(s)", executed)
 	}
 }
 
