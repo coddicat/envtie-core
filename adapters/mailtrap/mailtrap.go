@@ -322,20 +322,10 @@ func recipientLocalPart(environment string) string {
 }
 
 func sandboxOutputs(box *inbox, recipient string) map[string]string {
-	port := "2525"
-	for _, p := range box.SMTPPorts {
-		if p == 2525 || p == 587 || p == 25 || p == 465 {
-			port = strconv.Itoa(p)
-			break
-		}
-	}
-	if len(box.SMTPPorts) > 0 && port == "2525" {
-		port = strconv.Itoa(box.SMTPPorts[0])
-	}
 	out := map[string]string{
 		"MAILTRAP_INBOX_ID":  strconv.FormatInt(box.ID, 10),
 		"MAILTRAP_SMTP_HOST": "sandbox.smtp.mailtrap.io",
-		"MAILTRAP_SMTP_PORT": port,
+		"MAILTRAP_SMTP_PORT": preferSMTPPort(box.SMTPPorts),
 		"MAILTRAP_SMTP_USER": box.Username,
 	}
 	if box.Password != "" {
@@ -345,6 +335,25 @@ func sandboxOutputs(box *inbox, recipient string) map[string]string {
 		out[recipientTagOutput] = recipient
 	}
 	return out
+}
+
+// preferSMTPPort picks a submission port usable from hosted runners and PaaS
+// (Vercel blocks outbound 25). Mailtrap lists ports as [25,465,587,2525];
+// preferring the first match wrongly bound 25 and timed out on preview apps.
+func preferSMTPPort(ports []int) string {
+	for _, want := range []int{2525, 587, 465} {
+		for _, p := range ports {
+			if p == want {
+				return strconv.Itoa(p)
+			}
+		}
+	}
+	for _, p := range ports {
+		if p != 25 {
+			return strconv.Itoa(p)
+		}
+	}
+	return "2525"
 }
 
 func findByName(ctx context.Context, token, accountID, projectID, name string) (*inbox, error) {

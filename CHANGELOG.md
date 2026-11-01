@@ -4,6 +4,11 @@ All notable changes to EnvTie Core are documented here.
 
 ## Unreleased
 
+## [1.8.0-beta.5] - 2026-11-01
+
+- `mailtrap@1`: prefer SMTP ports `2525`, then `587`, then `465`. Mailtrap lists
+  `25` first; binding that broke Vercel preview apps (`ETIMEDOUT …:25`).
+
 ## [1.8.0-beta.4] - 2026-11-01
 
 - `mailtrap@1` shared mode requires `shared_sandbox_name` (exact Mailtrap

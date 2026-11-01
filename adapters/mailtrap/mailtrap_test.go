@@ -34,6 +34,21 @@ func withAPI(t *testing.T, fn roundTrip) {
 	client = &http.Client{Transport: fn}
 }
 
+func TestPreferSMTPPortSkipsBlockedPort25(t *testing.T) {
+	if got := preferSMTPPort([]int{25, 465, 587, 2525}); got != "2525" {
+		t.Fatalf("got %s want 2525", got)
+	}
+	if got := preferSMTPPort([]int{25, 465, 587}); got != "587" {
+		t.Fatalf("got %s want 587", got)
+	}
+	if got := preferSMTPPort([]int{25}); got != "2525" {
+		t.Fatalf("port 25 only should fall back to 2525, got %s", got)
+	}
+	if got := preferSMTPPort(nil); got != "2525" {
+		t.Fatalf("empty ports got %s", got)
+	}
+}
+
 func TestLifecycleCreatesInboxAndReturnsSMTP(t *testing.T) {
 	t.Setenv("MAILTRAP_API_TOKEN", "mt_fixture")
 	created := false
