@@ -155,8 +155,9 @@ func TestSharedModeCreatesOnceAndReuses(t *testing.T) {
 	})
 	cfg := map[string]string{
 		"account_id": "1", "project_id": "99",
-		"mode": "shared", "recipient_domain": "mail.example.test",
-		"name": "pr-7-mail", // engine-injected; shared mode must ignore for identity
+		"mode": "shared", "shared_sandbox_name": "envtie-shared",
+		"recipient_domain": "mail.example.test",
+		"name":             "pr-7-mail", // engine-injected; shared mode must ignore for identity
 	}
 	h := Handler{}
 	first, err := h.Handle(context.Background(), adapter.Request{Hook: "apply", Environment: "pr-7", Component: "mail", Config: cfg})
@@ -190,7 +191,8 @@ func TestSharedModeDestroyDoesNotDelete(t *testing.T) {
 		Hook: "destroy", Environment: "pr-7", Component: "mail", ExternalID: "7",
 		Config: map[string]string{
 			"account_id": "1", "project_id": "99",
-			"mode": "shared", "recipient_domain": "mail.example.test",
+			"mode": "shared", "shared_sandbox_name": "envtie-shared",
+			"recipient_domain": "mail.example.test",
 		},
 	})
 	if err != nil || !resp.Absent || deleted {
@@ -274,9 +276,31 @@ func TestSharedModeRequiresRecipientDomain(t *testing.T) {
 	})
 	_, err := Handler{}.Handle(context.Background(), adapter.Request{
 		Hook: "apply", Environment: "pr-7", Component: "mail",
-		Config: map[string]string{"account_id": "1", "project_id": "99", "mode": "shared"},
+		Config: map[string]string{
+			"account_id": "1", "project_id": "99",
+			"mode": "shared", "shared_sandbox_name": "Sandbox",
+		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "mailtrap_recipient_domain_required") || called {
+		t.Fatalf("err=%v called=%v", err, called)
+	}
+}
+
+func TestSharedModeRequiresSharedSandboxName(t *testing.T) {
+	t.Setenv("MAILTRAP_API_TOKEN", "mt_fixture")
+	called := false
+	withAPI(t, func(r *http.Request) (int, string) {
+		called = true
+		return http.StatusOK, `{}`
+	})
+	_, err := Handler{}.Handle(context.Background(), adapter.Request{
+		Hook: "apply", Environment: "pr-7", Component: "mail",
+		Config: map[string]string{
+			"account_id": "1", "project_id": "99",
+			"mode": "shared", "recipient_domain": "mail.example.test",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "mailtrap_shared_sandbox_name_required") || called {
 		t.Fatalf("err=%v called=%v", err, called)
 	}
 }
@@ -294,7 +318,8 @@ func TestSharedModeRejectsUnmanagedSandboxName(t *testing.T) {
 		Hook: "validate", Environment: "pr-7", Component: "mail", ExternalID: "7",
 		Config: map[string]string{
 			"account_id": "1", "project_id": "99",
-			"mode": "shared", "recipient_domain": "mail.example.test",
+			"mode": "shared", "shared_sandbox_name": "qa-inbox",
+			"recipient_domain": "mail.example.test",
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "mailtrap_inbox_unmanaged") {
@@ -313,7 +338,8 @@ func TestSharedModeReadReportsAbsentLikeReferenced(t *testing.T) {
 		Hook: "read", Environment: "pr-7", Component: "mail", ExternalID: "7",
 		Config: map[string]string{
 			"account_id": "1", "project_id": "99",
-			"mode": "shared", "recipient_domain": "mail.example.test",
+			"mode": "shared", "shared_sandbox_name": "envtie-shared",
+			"recipient_domain": "mail.example.test",
 		},
 	})
 	if err != nil || !resp.Absent || called {

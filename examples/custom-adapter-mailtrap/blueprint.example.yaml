@@ -13,7 +13,7 @@ components:
       # Shared: one sandbox for the project; isolate via MAILTRAP_RECIPIENT_TAG.
       # mode: shared
       # recipient_domain: mail.example.test
-      # shared_sandbox_name: envtie-shared
+      # shared_sandbox_name: Sandbox
 bindings:
   - from: mail.MAILTRAP_SMTP_HOST
     to: dotenv.MAILTRAP_SMTP_HOST

@@ -28,7 +28,6 @@ import (
 const (
 	modeDedicated      = "dedicated"
 	modeShared         = "shared"
-	defaultSharedName  = "envtie-shared"
 	recipientTagOutput = "MAILTRAP_RECIPIENT_TAG"
 )
 
@@ -210,7 +209,10 @@ func handleDedicated(ctx context.Context, token, accountID, projectID string, r 
 //     inventory without requiring a provider delete.
 //   - validate with external_id confirms the shared sandbox is still present.
 func handleShared(ctx context.Context, token, accountID, projectID string, r adapter.Request) (adapter.Response, error) {
-	sandboxName := sharedSandboxName(r.Config)
+	sandboxName := strings.TrimSpace(r.Config["shared_sandbox_name"])
+	if sandboxName == "" {
+		return adapter.Response{}, adapter.NewError("mailtrap_shared_sandbox_name_required")
+	}
 	recipient, err := recipientTag(r.Environment, r.Config["recipient_domain"])
 	if err != nil {
 		return adapter.Response{}, err
@@ -282,13 +284,6 @@ func handleShared(ctx context.Context, token, accountID, projectID string, r ada
 	default:
 		return adapter.Response{}, adapter.NewError("mailtrap_invalid_request")
 	}
-}
-
-func sharedSandboxName(cfg map[string]string) string {
-	if name := strings.TrimSpace(cfg["shared_sandbox_name"]); name != "" {
-		return name
-	}
-	return defaultSharedName
 }
 
 func recipientTag(environment, domain string) (string, error) {
