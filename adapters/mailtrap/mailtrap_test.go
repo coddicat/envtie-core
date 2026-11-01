@@ -168,7 +168,7 @@ func TestSharedModeCreatesOnceAndReuses(t *testing.T) {
 		t.Fatalf("creates=%d", creates)
 	}
 	second, err := h.Handle(context.Background(), adapter.Request{Hook: "apply", Environment: "pr-8", Component: "mail", Config: cfg})
-	if err != nil || second.ExternalID != "7" || second.Status != "ready" || second.Outputs["MAILTRAP_SMTP_PASS"] != "" {
+	if err != nil || second.ExternalID != "7" || second.Status != "ready" || second.Outputs["MAILTRAP_SMTP_PASS"] != "shared-pass" {
 		t.Fatalf("second apply %+v %v", second, err)
 	}
 	if creates != 1 {

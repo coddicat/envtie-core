@@ -65,7 +65,9 @@ func (Handler) Manifest() adapter.Manifest {
 			{Name: "MAILTRAP_SMTP_HOST", Sensitivity: "PUBLIC"},
 			{Name: "MAILTRAP_SMTP_PORT", Sensitivity: "PUBLIC"},
 			{Name: "MAILTRAP_SMTP_USER", Sensitivity: "SECRET"},
-			{Name: "MAILTRAP_SMTP_PASS", Sensitivity: "SECRET", Availability: adapter.AvailabilityCreate},
+			// Password is returned by Mailtrap list/get as well as create, so shared
+			// reuse and re-plans can bind vercel.env.MAILTRAP_SMTP_PASS.
+			{Name: "MAILTRAP_SMTP_PASS", Sensitivity: "SECRET"},
 			{Name: recipientTagOutput, Sensitivity: "PUBLIC"},
 		},
 	}
@@ -143,19 +145,17 @@ func handleDedicated(ctx context.Context, token, accountID, projectID string, r 
 			return adapter.Response{
 				ExternalID: strconv.FormatInt(existing.ID, 10),
 				Status:     "ready",
-				Outputs:    publicOutputs(existing, ""),
+				Outputs:    sandboxOutputs(existing, ""),
 			}, nil
 		}
 		box, status, err := createSandbox(ctx, token, projectID, name)
 		if err != nil {
 			return adapter.Response{}, classify(status, err)
 		}
-		out := publicOutputs(box, "")
-		out["MAILTRAP_SMTP_PASS"] = box.Password
 		return adapter.Response{
 			ExternalID: strconv.FormatInt(box.ID, 10),
 			Status:     "created",
-			Outputs:    out,
+			Outputs:    sandboxOutputs(box, ""),
 		}, nil
 	case "outputs":
 		if r.ExternalID == "" {
@@ -168,7 +168,7 @@ func handleDedicated(ctx context.Context, token, accountID, projectID string, r 
 		if name != "" && box.Name != name {
 			return adapter.Response{}, adapter.NewError("mailtrap_inbox_unmanaged")
 		}
-		return adapter.Response{Outputs: publicOutputs(box, "")}, nil
+		return adapter.Response{Outputs: sandboxOutputs(box, "")}, nil
 	case "destroy":
 		id := r.ExternalID
 		if id == "" && name != "" {
@@ -251,19 +251,17 @@ func handleShared(ctx context.Context, token, accountID, projectID string, r ada
 			return adapter.Response{
 				ExternalID: strconv.FormatInt(existing.ID, 10),
 				Status:     "ready",
-				Outputs:    publicOutputs(existing, recipient),
+				Outputs:    sandboxOutputs(existing, recipient),
 			}, nil
 		}
 		box, status, err := createSandbox(ctx, token, projectID, sandboxName)
 		if err != nil {
 			return adapter.Response{}, classify(status, err)
 		}
-		out := publicOutputs(box, recipient)
-		out["MAILTRAP_SMTP_PASS"] = box.Password
 		return adapter.Response{
 			ExternalID: strconv.FormatInt(box.ID, 10),
 			Status:     "created",
-			Outputs:    out,
+			Outputs:    sandboxOutputs(box, recipient),
 		}, nil
 	case "outputs":
 		if r.ExternalID == "" {
@@ -276,7 +274,7 @@ func handleShared(ctx context.Context, token, accountID, projectID string, r ada
 		if box.Name != sandboxName {
 			return adapter.Response{}, adapter.NewError("mailtrap_inbox_unmanaged")
 		}
-		return adapter.Response{Outputs: publicOutputs(box, recipient)}, nil
+		return adapter.Response{Outputs: sandboxOutputs(box, recipient)}, nil
 	case "destroy":
 		// Referenced semantics: detach only. Never delete the shared sandbox
 		// or clear its messages; operators delete it manually if needed.
@@ -323,7 +321,7 @@ func recipientLocalPart(environment string) string {
 	return strings.Trim(b.String(), "-")
 }
 
-func publicOutputs(box *inbox, recipient string) map[string]string {
+func sandboxOutputs(box *inbox, recipient string) map[string]string {
 	port := "2525"
 	for _, p := range box.SMTPPorts {
 		if p == 2525 || p == 587 || p == 25 || p == 465 {
@@ -339,6 +337,9 @@ func publicOutputs(box *inbox, recipient string) map[string]string {
 		"MAILTRAP_SMTP_HOST": "sandbox.smtp.mailtrap.io",
 		"MAILTRAP_SMTP_PORT": port,
 		"MAILTRAP_SMTP_USER": box.Username,
+	}
+	if box.Password != "" {
+		out["MAILTRAP_SMTP_PASS"] = box.Password
 	}
 	if recipient != "" {
 		out[recipientTagOutput] = recipient

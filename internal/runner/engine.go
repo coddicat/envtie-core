@@ -683,7 +683,7 @@ func injectVercelGitBranch(cfg map[string]string) {
 }
 
 // injectVercelEnvBindings copies resolved outputs into config keys env.<NAME>
-// for the vercel adapter. Creation-only outputs (for example MAILTRAP_SMTP_PASS)
+// for the vercel adapter. Creation-only outputs (for example STRIPE_WEBHOOK_SECRET)
 // that were delivered on a prior READY apply are skipped so re-plans still work.
 // Outputs from components still pending in the plan (for example Stripe after
 // host) are deferred; refreshVercelAfterSources injects them on a second deploy.

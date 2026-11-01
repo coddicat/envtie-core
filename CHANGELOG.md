@@ -4,9 +4,15 @@ All notable changes to EnvTie Core are documented here.
 
 ## Unreleased
 
+## [1.8.0-beta.4] - 2026-11-01
+
 - `mailtrap@1` shared mode requires `shared_sandbox_name` (exact Mailtrap
   sandbox name). The previous silent default `envtie-shared` is removed;
   missing name → `mailtrap_shared_sandbox_name_required`.
+- `mailtrap@1`: emit `MAILTRAP_SMTP_PASS` on find/reuse and drop create-only
+  availability. Mailtrap returns the password from list/get, and shared mode
+  reuses an existing sandbox on first apply—without the password, Vercel
+  bindings failed with `output absent for Vercel env`.
 
 ## [1.8.0-beta.3] - 2026-10-30
 
