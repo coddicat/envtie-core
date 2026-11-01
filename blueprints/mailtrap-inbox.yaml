@@ -7,13 +7,14 @@ components:
       account_id: "REPLACE_WITH_MAILTRAP_ACCOUNT_ID"
       project_id: "REPLACE_WITH_MAILTRAP_PROJECT_ID"
       # mode: dedicated (default) — one sandbox per environment; deleted on destroy.
-      # mode: shared — one sandbox for the project (shared_sandbox_name or envtie-shared).
-      #   Requires recipient_domain. Destroy does not delete the sandbox. Isolate tests
-      #   by filtering Mailtrap messages for MAILTRAP_RECIPIENT_TAG. SMTP credentials are
-      #   shared across environments; prefer dedicated when hard isolation matters.
+      # mode: shared — one sandbox for the project. Requires recipient_domain and
+      #   shared_sandbox_name (exact Mailtrap sandbox name; no default). Destroy does
+      #   not delete the sandbox. Isolate tests by filtering Mailtrap messages for
+      #   MAILTRAP_RECIPIENT_TAG. SMTP credentials are shared across environments;
+      #   prefer dedicated when hard isolation matters.
       # mode: shared
       # recipient_domain: mail.example.test
-      # shared_sandbox_name: envtie-shared
+      # shared_sandbox_name: Sandbox
 bindings:
   - from: mail.MAILTRAP_SMTP_HOST
     to: dotenv.MAILTRAP_SMTP_HOST

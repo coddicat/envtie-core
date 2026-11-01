@@ -17,11 +17,12 @@ count.
 
 ### Shared
 
-Set `mode: shared` plus `recipient_domain` (required). All environments in the
-same Mailtrap project share **one** sandbox (`shared_sandbox_name`, or
-`envtie-shared` when omitted). Apply creates that sandbox if it is absent;
-destroy does **not** delete it, clear its messages, or adopt a sandbox whose
-name does not match. Deleting the shared sandbox is a manual operator action.
+Set `mode: shared` plus `recipient_domain` and `shared_sandbox_name` (both
+required; use the exact Mailtrap sandbox name). All environments in the same
+Mailtrap project share **one** sandbox. Apply creates that sandbox if it is
+absent; destroy does **not** delete it, clear its messages, or adopt a sandbox
+whose name does not match. Deleting the shared sandbox is a manual operator
+action.
 
 Outputs still include the usual `MAILTRAP_SMTP_*` values (identical across
 environments — expected) plus `MAILTRAP_RECIPIENT_TAG`, a deterministic address
@@ -50,7 +51,7 @@ components:
       # Optional shared mode (one sandbox for the project):
       # mode: shared
       # recipient_domain: mail.example.test
-      # shared_sandbox_name: envtie-shared
+      # shared_sandbox_name: Sandbox
 bindings:
   - from: mail.MAILTRAP_SMTP_HOST
     to: dotenv.MAILTRAP_SMTP_HOST
